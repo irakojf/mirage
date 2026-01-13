@@ -1,0 +1,18 @@
+# Mirage Slack Bot Dependencies
+
+# Slack SDK
+slack-bolt>=1.18.0
+slack-sdk>=3.21.0
+
+# Web server
+flask>=3.0.0
+gunicorn>=21.0.0
+
+# Claude API
+anthropic>=0.39.0
+
+# Turso (libSQL) database
+libsql-experimental>=0.0.47
+
+# Environment variables
+python-dotenv>=1.0.0

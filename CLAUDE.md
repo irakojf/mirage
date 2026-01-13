@@ -33,6 +33,21 @@ All data lives in `data/mirage.db` (SQLite). Key tables:
 - `identity`: User's identity statements by category
 - `reviews`: Weekly review records
 
+### Database Permissions
+
+**Auto-approved (no confirmation needed):**
+- `SELECT` — read data
+- `INSERT` — add new records
+- `UPDATE` — modify existing records
+
+**Requires user confirmation (destructive):**
+- `DELETE` — removing records
+- `DROP TABLE` — deleting tables
+- `TRUNCATE` — clearing all data
+- Any command that could erase significant data
+
+Before running destructive commands, warn the user and ask for confirmation.
+
 ## Knowledge Base
 
 Reference these when making decisions:
@@ -44,6 +59,7 @@ Reference these when making decisions:
 
 - `google-calendar`: Check free time, schedule tasks
 - `notion`: Fetch Production Calendar from Notion
+- `slack`: Capture tasks via @mirage mentions (see Slack Integration below)
 
 ## Task Buckets
 
@@ -78,3 +94,67 @@ Reference these when making decisions:
 URL: `https://www.notion.so/Production-Calendar-28535d23b569808c9689fa367f5fc9b5`
 
 Check this when user asks about production schedule or content calendar.
+
+## Slack Integration
+
+Capture tasks from Slack by @mentioning Mirage or DM'ing the bot.
+
+### Architecture
+
+```
+Slack (phone/desktop) → fly.io bot → Claude API → Turso (cloud SQLite)
+                                                        ↑
+                                      Local Claude Code ─┘
+```
+
+### Setup (One-Time)
+
+1. **Turso Database**
+   ```bash
+   brew install tursodatabase/tap/turso
+   turso auth login
+   turso db create mirage
+   turso db shell mirage < data/schema.sql
+   ```
+
+2. **Slack App** (api.slack.com/apps)
+   - Create app with scopes: `app_mentions:read`, `chat:write`, `im:history`, `channels:history`
+   - Enable Event Subscriptions: `app_mention`, `message.im`
+
+3. **Deploy** (fly.io)
+   ```bash
+   cd mcp/slack
+   fly launch --no-deploy
+   fly secrets set SLACK_BOT_TOKEN=xoxb-...
+   fly secrets set SLACK_SIGNING_SECRET=...
+   fly secrets set ANTHROPIC_API_KEY=...
+   fly secrets set TURSO_DATABASE_URL=libsql://...
+   fly secrets set TURSO_AUTH_TOKEN=...
+   fly deploy
+   ```
+
+4. **Set Event URL** in Slack: `https://mirage-slack.fly.dev/slack/events`
+
+### Usage
+
+**In channels:**
+```
+@mirage call mom tomorrow
+@mirage blocked on design review from Sarah
+```
+
+**In DMs to Mirage:**
+```
+buy groceries
+research vacation spots
+```
+
+### Environment Variables (Local)
+
+Add to shell profile for local Claude Code to access Turso:
+```bash
+export TURSO_DATABASE_URL=libsql://mirage-xxx.turso.io
+export TURSO_AUTH_TOKEN=your-token
+```
+
+See `mcp/slack/README.md` for full setup documentation.
