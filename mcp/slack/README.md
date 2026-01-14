@@ -39,17 +39,16 @@ turso db shell mirage < ../../data/schema.sql
 3. Name: `Mirage`, select your workspace
 
 **Bot Token Scopes** (OAuth & Permissions):
-- `app_mentions:read` - Receive @mirage mentions
 - `chat:write` - Send messages
-- `im:history` - Read DM history
-- `channels:history` - Read channel messages
+- `commands` - Handle slash commands
 
-**Event Subscriptions**:
-- Enable Events
-- Request URL: `https://mirage-slack.fly.dev/slack/events` (set after deploy)
-- Subscribe to bot events:
-  - `app_mention`
-  - `message.im`
+**Slash Commands**:
+1. Go to "Slash Commands" in sidebar
+2. Click "Create New Command"
+3. Command: `/mirage`
+4. Request URL: `https://mirage-slack.fly.dev/slack/commands` (set after deploy)
+5. Short Description: `Capture a task privately`
+6. Usage Hint: `[task description]`
 
 **Install to Workspace** and save:
 - `SLACK_BOT_TOKEN` (starts with `xoxb-`)
@@ -108,18 +107,19 @@ ngrok http 3000
 
 ## Usage
 
-**In channels:**
+Use `/mirage` anywhere in Slack - it's completely private (nobody else sees it).
+
+**Capture a task:**
 ```
-@mirage call mom tomorrow
-@mirage finish quarterly report by Friday
-@mirage blocked on design review from Sarah
+/mirage call mom tomorrow
+/mirage finish quarterly report by Friday
+/mirage blocked on design review from Sarah
 ```
 
-**In DMs:**
+**From a thread context:**
 ```
-buy groceries
-research vacation destinations
-waiting for client feedback on proposal
+/mirage follow up on design feedback from this thread
+/mirage Sarah needs budget approval - waiting on her
 ```
 
 ## Response Format
@@ -143,15 +143,14 @@ Flagged for procrastination review
 
 ## Troubleshooting
 
-**"Challenge Failed" error when setting Event URL:**
-- Make sure the server is running
+**Slash command not working:**
+- Verify the Request URL is correct: `https://mirage-slack.fly.dev/slack/commands`
 - Check `fly logs` for errors
-- Verify the URL is correct: `https://mirage-slack.fly.dev/slack/events`
+- Ensure the app is reinstalled after adding the slash command
 
-**Bot not responding:**
-- Check that bot is invited to the channel
-- Verify Event Subscriptions are enabled
-- Check secrets are set: `fly secrets list`
+**"dispatch_failed" error:**
+- Server not running - check `fly status`
+- Wrong URL configured - verify `/slack/commands` endpoint
 
 **Database errors:**
 - Verify Turso credentials

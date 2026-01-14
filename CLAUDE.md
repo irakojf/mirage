@@ -21,17 +21,26 @@ Be direct, supportive, and focused on **systems over goals**. You're not a gener
 |---------|---------|
 | `/dump` | Start a brain dump — capture everything on your mind |
 | `/done` | End dump, process and categorize tasks |
-| `/todo` | Show Kanban board of all tasks |
+| `/trello` | Show Kanban board of all tasks |
 | `/identity` | Set/update identity goals (Love, Relationships, Work, Health, Wealth) |
 | `/review` | Weekly review — reflect on energy, patterns, and plan ahead |
 
 ## Database
 
-All data lives in `data/mirage.db` (SQLite). Key tables:
+**Primary database is Turso** (cloud SQLite) — shared between Slack bot and local Claude Code.
+
+Query with:
+```bash
+turso db shell mirage "SELECT * FROM tasks WHERE status = 'open';"
+```
+
+Key tables:
 - `tasks`: Core task storage with bucket, status, times_added, energy_rating
 - `dump_sessions`: Track each brain dump session
 - `identity`: User's identity statements by category
 - `reviews`: Weekly review records
+
+**Note:** `data/mirage.db` is a local development copy — do not use for production queries.
 
 ### Database Permissions
 
@@ -50,10 +59,30 @@ Before running destructive commands, warn the user and ask for confirmation.
 
 ## Knowledge Base
 
-Reference these when making decisions:
-- `knowledge/atomic-habits.pdf` — James Clear's framework
-- `knowledge/tim-ferris-podcast.txt` — Extended interview with practical tactics
-- `knowledge/principles.md` — Distilled decision rules (build over time)
+**Primary reference:** `knowledge/principles.md` — Distilled frameworks, questions, and tactics from Atomic Habits. Use this for all task processing and coaching decisions.
+
+Source documents (for deep dives only):
+- `knowledge/atomic-habits.pdf` — Full book
+- `knowledge/tim-ferris-podcast.txt` — Extended interview
+
+### Decision Framework (from principles.md)
+
+When processing tasks, apply these filters:
+1. **Identity alignment** — Does this connect to who the user wants to become?
+2. **Keystone check** — Is this upstream from other important behaviors?
+3. **2-minute test** — Can this be done in 2 minutes? Flag as `[DO IT]`
+4. **Never miss twice** — Skipped yesterday? Priority today
+5. **Friction analysis** — What's making this hard? How to reduce friction?
+6. **Compound potential** — Does this build over time? `[COMPOUNDS]`
+
+### Coaching Questions (from principles.md)
+
+Use these during `/review` or when a task keeps appearing:
+- "What am I optimizing for?"
+- "Does this activity fill me with energy or drain me?"
+- "Can my current habits carry me to my desired future?"
+- "What would this look like if it were easy?"
+- "If someone could only see my actions, what would they say my priorities are?"
 
 ## MCP Servers
 
@@ -97,7 +126,7 @@ Check this when user asks about production schedule or content calendar.
 
 ## Slack Integration
 
-Capture tasks from Slack by @mentioning Mirage or DM'ing the bot.
+Capture tasks from Slack using `/mirage` - completely private (nobody else sees it).
 
 ### Architecture
 
@@ -118,8 +147,8 @@ Slack (phone/desktop) → fly.io bot → Claude API → Turso (cloud SQLite)
    ```
 
 2. **Slack App** (api.slack.com/apps)
-   - Create app with scopes: `app_mentions:read`, `chat:write`, `im:history`, `channels:history`
-   - Enable Event Subscriptions: `app_mention`, `message.im`
+   - Create app with scopes: `chat:write`, `commands`
+   - Add Slash Command: `/mirage` → `https://mirage-slack.fly.dev/slack/commands`
 
 3. **Deploy** (fly.io)
    ```bash
@@ -133,20 +162,13 @@ Slack (phone/desktop) → fly.io bot → Claude API → Turso (cloud SQLite)
    fly deploy
    ```
 
-4. **Set Event URL** in Slack: `https://mirage-slack.fly.dev/slack/events`
-
 ### Usage
 
-**In channels:**
+Use `/mirage` anywhere - only you see it and the response:
 ```
-@mirage call mom tomorrow
-@mirage blocked on design review from Sarah
-```
-
-**In DMs to Mirage:**
-```
-buy groceries
-research vacation spots
+/mirage call mom tomorrow
+/mirage blocked on design review from Sarah
+/mirage follow up on thread with marketing team
 ```
 
 ### Environment Variables (Local)

@@ -26,6 +26,16 @@ SYSTEM_PROMPT = """You are Mirage, a task processing agent inspired by James Cle
 
 Your job is to process raw task input from Slack and return structured task data.
 
+## IMPORTANT: User Identity
+The user's name is "Ira". When you see messages referring to "Ira" in third person, convert them to first-person tasks for the user:
+- "Ira will bring the tripod" → "Bring the tripod"
+- "Ira needs to call mom" → "Call mom"
+- "Ira - do QUICKBOOKS" → "Do QUICKBOOKS"
+- "Tell Ira to send the invoice" → "Send the invoice"
+
+If someone else is responsible (not Ira), keep their name and mark as blocked:
+- "Sarah will send the designs" → "Wait for Sarah to send the designs" (blocked on Sarah)
+
 ## Core Principles (from Atomic Habits)
 1. Identity over outcomes: "Who do you want to become?" drives prioritization
 2. 2-minute rule: If it takes <2 min, flag as [DO IT]
@@ -70,6 +80,16 @@ Be strict: only mark as duplicate if it's truly the same task."""
 THREAD_SYSTEM_PROMPT = """You are Mirage, a task processing agent inspired by James Clear's Atomic Habits.
 
 Your job is to read a Slack thread conversation and extract a single, actionable task that captures the essence of what needs to be done.
+
+## IMPORTANT: User Identity
+The user's name is "Ira". When you see messages referring to "Ira" in third person, convert them to first-person tasks for the user:
+- "Ira will bring the tripod" → "Bring the tripod"
+- "Ira needs to call mom" → "Call mom"
+- "Ira - do QUICKBOOKS" → "Do QUICKBOOKS"
+- "Tell Ira to send the invoice" → "Send the invoice"
+
+If someone else is responsible (not Ira), keep their name and mark as blocked:
+- "Sarah will send the designs" → "Wait for Sarah to send the designs" (blocked on Sarah)
 
 ## How to Process Thread Conversations
 1. Read the entire conversation to understand the context
@@ -193,6 +213,7 @@ Remember: Respond with JSON only."""
 
     # Parse the response
     response_text = response.content[0].text.strip()
+    logger.info(f"Claude response: {response_text[:500]}")
 
     # Try to extract JSON from the response
     try:
@@ -227,11 +248,17 @@ Remember: Respond with JSON only."""
     # Ensure required fields exist
     result.setdefault("content", raw_input.strip())
     result.setdefault("bucket", "action")
-    result.setdefault("estimated_minutes", None)
     result.setdefault("tags", [])
     result.setdefault("is_duplicate", False)
     result.setdefault("duplicate_of", None)
     result.setdefault("blocked_on", None)
+
+    # Ensure action tasks have an estimate (default to 5 min if Claude didn't provide)
+    if result.get("bucket") == "action" and not result.get("estimated_minutes"):
+        result["estimated_minutes"] = 5
+        logger.info(f"Defaulting estimated_minutes to 5 for action task: {result['content'][:50]}")
+    elif result.get("bucket") != "action":
+        result["estimated_minutes"] = None
 
     return result
 

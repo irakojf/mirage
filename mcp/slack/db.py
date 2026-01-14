@@ -94,11 +94,11 @@ def find_similar_task(content: str) -> Optional[dict]:
     return None
 
 
-def increment_task_mentions(task_id: str) -> dict:
+def increment_task_mentions(task_id: str) -> Optional[dict]:
     """
     Increment the times_added counter for an existing task.
 
-    Returns the updated task dict.
+    Returns the updated task dict, or None if task doesn't exist.
     """
     conn = get_connection()
     now = datetime.now().isoformat()
@@ -123,6 +123,9 @@ def increment_task_mentions(task_id: str) -> dict:
     )
     row = cursor.fetchone()
     conn.close()
+
+    if not row:
+        return None
 
     return {
         "id": row[0],

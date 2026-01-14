@@ -8,9 +8,9 @@ Display all tasks organized as a Kanban board.
    ```sql
    SELECT * FROM tasks ORDER BY
      CASE status
-       WHEN 'in_progress' THEN 1
-       WHEN 'pending' THEN 2
-       WHEN 'completed' THEN 3
+       WHEN 'open' THEN 1
+       WHEN 'done' THEN 2
+       WHEN 'archived' THEN 3
      END,
      CASE bucket
        WHEN 'action' THEN 1
@@ -18,16 +18,15 @@ Display all tasks organized as a Kanban board.
        WHEN 'blocked' THEN 3
        WHEN 'idea' THEN 4
      END,
-     created_at DESC;
+     first_added_at DESC;
    ```
 
 2. Display as a Kanban board with columns:
-   - **In Progress** — what's actively being worked on
-   - **Pending** — ready to start
-   - **Blocked** — waiting on something
-   - **Completed** (recent only, last 7 days)
+   - **Open** — tasks ready to work on (grouped by bucket)
+   - **Done** (recent only, last 7 days)
+   - **Archived** — old completed tasks (count only)
 
-3. Within each column, group by bucket (action, project, idea)
+3. Within each column, group by bucket (action, project, blocked, idea)
 
 4. Highlight special items:
    - `[NEVER MISS TWICE]` — if a task was skipped yesterday
@@ -39,20 +38,23 @@ Display all tasks organized as a Kanban board.
 ## Display Format
 
 ```
-## In Progress
+## Open Tasks
+
 **Actions**
 - [ ] Task name [KEYSTONE]
-
-## Pending
-**Actions**
 - [ ] Quick task [DO IT]
-- [ ] Another task
 
 **Projects**
-- [ ] Multi-step thing (3 subtasks)
+- [ ] Multi-step thing
 
-## Blocked
+**Blocked**
 - [ ] Waiting on X from @person
+
+**Ideas**
+- [ ] Something to explore
+
+## Recently Done (7 days)
+- [x] Completed task
 ```
 
 ## Persona

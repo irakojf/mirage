@@ -21,13 +21,13 @@ End the current brain dump session and process all captured items into organized
 
 3. Insert new tasks:
    ```sql
-   INSERT INTO tasks (name, bucket, status, priority_tags, created_at, times_added)
-   VALUES (?, ?, 'pending', ?, datetime('now'), 1);
+   INSERT INTO tasks (id, content, bucket, status, first_added_at, last_added_at, times_added)
+   VALUES (lower(hex(randomblob(16))), ?, ?, 'open', datetime('now'), datetime('now'), 1);
    ```
 
-4. For duplicates, increment `times_added`:
+4. For duplicates, increment `times_added` and update `last_added_at`:
    ```sql
-   UPDATE tasks SET times_added = times_added + 1 WHERE id = ?;
+   UPDATE tasks SET times_added = times_added + 1, last_added_at = datetime('now') WHERE id = ?;
    ```
 
 5. Flag procrastination: If `times_added >= 3`, surface it:
