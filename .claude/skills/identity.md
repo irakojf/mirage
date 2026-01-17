@@ -5,21 +5,17 @@ description: Set and update your identity goals - who you want to become
 
 ## Instructions
 
-When the user runs /identity, manage their identity statements:
+When the user runs /identity, manage their identity statements stored in Notion.
 
-### 1. Check for Existing Identity
+**Identity Page:** https://www.notion.so/Identity-2eb35d23b569808eb1ecc18dc3903100
 
-```sql
-SELECT category, statement, updated_at
-FROM identity
-ORDER BY
-    CASE category
-        WHEN 'love' THEN 1
-        WHEN 'relationships' THEN 2
-        WHEN 'work' THEN 3
-        WHEN 'health' THEN 4
-        WHEN 'wealth' THEN 5
-    END;
+### 1. Fetch Current Identity
+
+Use the Notion MCP to read the Identity page:
+
+```
+Call: mcp__notion__get_notion_page
+Arguments: { "page_id": "2eb35d23b569808eb1ecc18dc3903100" }
 ```
 
 ### 2. Display Current Identity (if exists)
@@ -32,8 +28,6 @@ Relationships: "I am someone who..."
 Work:          "I am someone who..."
 Health:        "I am someone who..."
 Wealth:        "I am someone who..."
-
-Last updated: [date]
 ```
 
 ### 3. Prompt for Updates
@@ -55,12 +49,30 @@ Guide the user to write identity statements in James Clear's format:
 - Health: "I am someone who never misses a workout twice"
 - Wealth: "I am the type of person who pays themselves first"
 
-### 5. Save Identity
+### 5. Save Identity to Notion
 
-```sql
-INSERT OR REPLACE INTO identity (category, statement, updated_at)
-VALUES ('<category>', '<statement>', datetime('now'));
+**Important:** Identity is stored directly on the Notion page as structured content.
+
+Format the page content as:
+
 ```
+## Love
+I am someone who...
+
+## Relationships
+I am someone who...
+
+## Work
+I am someone who...
+
+## Health
+I am someone who...
+
+## Wealth
+I am someone who...
+```
+
+Tell the user to update the Notion page directly, or use the Notion API to update page blocks if available.
 
 ### 6. First-Time Setup
 
@@ -98,5 +110,5 @@ The `/done` skill references these statements when inferring the `[IDENTITY]` ta
 - **Keep it simple**: One statement per category
 - **Use James Clear's format**: "I am someone who..." / "I am the type of person who..."
 - **Allow partial updates**: User can update just one category
-- **Show history**: Display when each statement was last updated
+- **Notion is the source of truth**: All identity data lives in the Notion page
 - **Connect to tasks**: Make it clear this influences prioritization

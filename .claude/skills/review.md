@@ -9,25 +9,50 @@ When the user runs /review, conduct a weekly review:
 
 ### 1. Gather Data
 
-```sql
--- Tasks completed this week
-SELECT id, content, bucket, completed_at, energy_rating
-FROM tasks
-WHERE status = 'done'
-AND completed_at >= date('now', '-7 days')
-ORDER BY completed_at;
+Query tasks from Notion and calendar events from Google Calendar:
 
--- Tasks still open
-SELECT id, content, bucket, times_added, first_added_at
-FROM tasks
-WHERE status = 'open'
-ORDER BY times_added DESC;
-
--- Dump sessions this week
-SELECT COUNT(*) as dumps, SUM(LENGTH(raw_input)) as total_input
-FROM dump_sessions
-WHERE started_at >= date('now', '-7 days');
 ```
+# Tasks completed this week
+Call: mcp__notion__query_tasks
+Arguments: { "status_filter": "Done" }
+
+# Tasks still open
+Call: mcp__notion__query_tasks
+Arguments: { "exclude_done": true }
+
+# Calendar events for this week (Sunday to Saturday)
+Call: mcp__google-calendar__list_events
+Arguments: { "start_date": "<sunday of this week>", "end_date": "<saturday of this week>" }
+```
+
+Filter completed tasks by `created_time` for "this week" logic.
+
+### 1b. Display Calendar Summary
+
+Show what actually happened this week by organizing calendar events by day:
+
+```
+THIS WEEK'S CALENDAR (Jan 12-18)
+
+Sunday 1/12
+- Production Day (7:15am - 6:50pm)
+- Company lunch
+- Weekly Data Insights Brainstorm
+
+Monday 1/13
+- Lower Body Strength workout
+- Standup
+- Sauna
+...
+```
+
+Group events by:
+- **Production/Shoots** — major work blocks
+- **Meetings** — calls, 1:1s, client meetings
+- **Workouts** — fitness activities
+- **Personal** — meals, wind down, etc.
+
+This provides context for the review — what the week actually looked like beyond just tasks.
 
 ### 2. Celebrate Wins
 
@@ -63,7 +88,12 @@ Let's tag how these tasks felt. For each one, tell me:
 ...
 ```
 
-Store the energy_rating on each task for future pattern recognition.
+Store the energy rating on each task:
+
+```
+Call: mcp__notion__update_task
+Arguments: { "page_id": "...", "energy": "green" }
+```
 
 ### 4. Pattern Recognition
 
@@ -85,14 +115,12 @@ Energy gains:
   How can you do more of these?
 
 Identity alignment:
-  [X]% of completed tasks aligned with your identity goals.
-  Your "[work]" identity got the most attention.
-  Your "[health]" identity got the least.
+  [X]% of completed tasks had the Identity tag.
 ```
 
 ### 5. Stale Task Cleanup
 
-Surface tasks that have been sitting too long:
+Surface tasks that have been sitting too long (check `created_time`):
 
 ```
 STALE TASKS (open 2+ weeks)
@@ -108,6 +136,13 @@ These have been on your list a while:
 For each: Archive / Delegate / Recommit / Break down?
 ```
 
+To archive stale tasks:
+
+```
+Call: mcp__notion__update_task
+Arguments: { "page_id": "...", "status": "Archived" }
+```
+
 ### 6. Blocked Item Check
 
 Review blocked items:
@@ -116,11 +151,10 @@ Review blocked items:
 BLOCKED ITEMS
 
 1. "API migration" — waiting on DevOps
-   Follow up was: Jan 16 (3 days ago)
    Did this get unblocked? Update status?
 
 2. "Budget approval" — waiting on Finance
-   Follow up is: Jan 20 (in 4 days)
+   Status check needed?
 ```
 
 ### 7. Next Week Planning
@@ -145,17 +179,21 @@ What's your #1 priority for next week?
 
 ### 8. Save Review Record
 
-```sql
-INSERT INTO reviews (id, week_start, completed_at, notes, tasks_completed, tasks_added)
-VALUES (
-    lower(hex(randomblob(8))),
-    date('now', '-7 days'),
-    datetime('now'),
-    '<summary>',
-    <completed_count>,
-    <added_count>
-);
+At the end of the review, save it to Notion with the full conversation transcript:
+
 ```
+Call: mcp__notion__create_review
+Arguments: {
+    "week_of": "2025-01-13",  // Start of the week being reviewed
+    "wins": "Completed 12 tasks including...",
+    "struggles": "Procrastinated on dentist appointment...",
+    "next_week_focus": "Ship the MVP",
+    "tasks_completed": 12,
+    "transcript": "<full conversation from /review to end>"
+}
+```
+
+**Important:** Capture the ENTIRE conversation that happened during the review - all questions asked, user responses, insights surfaced. This transcript is valuable for future pattern recognition.
 
 ### 9. Knowledge Base Integration
 

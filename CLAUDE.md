@@ -27,35 +27,47 @@ Be direct, supportive, and focused on **systems over goals**. You're not a gener
 
 ## Database
 
-**Primary database is Turso** (cloud SQLite) — shared between Slack bot and local Claude Code.
+### Tasks: Notion Database
 
-Query with:
-```bash
-turso db shell mirage "SELECT * FROM tasks WHERE status = 'open';"
+**Primary task storage is Notion** — shared between Slack bot and local Claude Code via MCP.
+
+Use Notion MCP tools for task operations:
+```
+mcp__notion__query_tasks      # Fetch tasks
+mcp__notion__create_task      # Create new task
+mcp__notion__update_task      # Update task
+mcp__notion__increment_task_mention  # Increment mention count
 ```
 
-Key tables:
-- `tasks`: Core task storage with bucket, status, times_added, energy_rating
-- `dump_sessions`: Track each brain dump session
-- `identity`: User's identity statements by category
-- `reviews`: Weekly review records
+Notion database ID: `2ea35d23-b569-80cc-99be-e6d6a17b1548`
 
-**Note:** `data/mirage.db` is a local development copy — do not use for production queries.
+**Task properties:**
+| Property | Type | Values |
+|----------|------|--------|
+| Name | title | Task description |
+| Status | status | Tasks, Projects, Ideas, Blocked, Done |
+| Mentioned | number | Procrastination counter |
+| Blocked | text | Who/what is blocking |
+| Energy | select | Red, Yellow, Green |
+| Type | select | Identity, Compound |
 
-### Database Permissions
+### Reviews: Notion Database
 
-**Auto-approved (no confirmation needed):**
-- `SELECT` — read data
-- `INSERT` — add new records
-- `UPDATE` — modify existing records
+Reviews are stored in Notion with full conversation transcripts.
 
-**Requires user confirmation (destructive):**
-- `DELETE` — removing records
-- `DROP TABLE` — deleting tables
-- `TRUNCATE` — clearing all data
-- Any command that could erase significant data
+```
+mcp__notion__create_review  # Save weekly review with transcript
+```
 
-Before running destructive commands, warn the user and ask for confirmation.
+Notion database ID: `2eb35d23-b569-8040-859f-d5baff2957ab`
+
+### Identity: Notion Page
+
+Identity statements are stored in a Notion page.
+
+**Page:** https://www.notion.so/Identity-2eb35d23b569808eb1ecc18dc3903100
+
+Use `/identity` to view and update identity goals.
 
 ## Knowledge Base
 
@@ -87,27 +99,28 @@ Use these during `/review` or when a task keeps appearing:
 ## MCP Servers
 
 - `google-calendar`: Check free time, schedule tasks
-- `notion`: Fetch Production Calendar from Notion
+- `notion`: Task management (query, create, update) + Production Calendar
 - `slack`: Capture tasks via @mirage mentions (see Slack Integration below)
 
-## Task Buckets
+## Task Status (Notion)
 
-| Bucket | Criteria |
+| Status | Criteria |
 |--------|----------|
-| **action** | Single sitting, clear next step |
-| **project** | Multi-step, needs breakdown |
-| **idea** | Needs more thinking |
-| **blocked** | Waiting on someone/something |
+| **Tasks** | Single sitting, clear next step (actions) |
+| **Projects** | Multi-step, needs breakdown |
+| **Ideas** | Needs more thinking |
+| **Blocked** | Waiting on someone/something |
+| **Done** | Completed |
 
-## Priority Tags
+## Task Type (Notion)
 
 | Tag | Meaning |
 |-----|---------|
-| `[DO IT]` | ≤2 min, do immediately |
-| `[NEVER MISS TWICE]` | Skipped yesterday |
-| `[KEYSTONE]` | Unlocks other tasks |
-| `[COMPOUNDS]` | 1% improvement, builds over time |
-| `[IDENTITY]` | Aligns with identity goals |
+| `[Do It Now ]` | ≤2 min, do immediately |
+| `[Never Miss 2x]` | Skipped yesterday |
+| `[Unblocks]` | Unlocks other tasks |
+| `[Compounds]` | 1% improvement, builds over time |
+| `[Identity]` | Aligns with identity goals |
 
 ## Key Behaviors
 
@@ -131,34 +144,27 @@ Capture tasks from Slack using `/mirage` - completely private (nobody else sees 
 ### Architecture
 
 ```
-Slack (phone/desktop) → fly.io bot → Claude API → Turso (cloud SQLite)
+Slack (phone/desktop) → fly.io bot → Claude API → Notion (all data)
                                                         ↑
                                       Local Claude Code ─┘
 ```
 
+**All data lives in Notion:** tasks, reviews, identity.
+
 ### Setup (One-Time)
 
-1. **Turso Database**
-   ```bash
-   brew install tursodatabase/tap/turso
-   turso auth login
-   turso db create mirage
-   turso db shell mirage < data/schema.sql
-   ```
-
-2. **Slack App** (api.slack.com/apps)
+1. **Slack App** (api.slack.com/apps)
    - Create app with scopes: `chat:write`, `commands`
    - Add Slash Command: `/mirage` → `https://mirage-slack.fly.dev/slack/commands`
 
-3. **Deploy** (fly.io)
+2. **Deploy** (fly.io)
    ```bash
    cd mcp/slack
    fly launch --no-deploy
    fly secrets set SLACK_BOT_TOKEN=xoxb-...
    fly secrets set SLACK_SIGNING_SECRET=...
    fly secrets set ANTHROPIC_API_KEY=...
-   fly secrets set TURSO_DATABASE_URL=libsql://...
-   fly secrets set TURSO_AUTH_TOKEN=...
+   fly secrets set NOTION_TOKEN=secret_...
    fly deploy
    ```
 
@@ -169,14 +175,6 @@ Use `/mirage` anywhere - only you see it and the response:
 /mirage call mom tomorrow
 /mirage blocked on design review from Sarah
 /mirage follow up on thread with marketing team
-```
-
-### Environment Variables (Local)
-
-Add to shell profile for local Claude Code to access Turso:
-```bash
-export TURSO_DATABASE_URL=libsql://mirage-xxx.turso.io
-export TURSO_AUTH_TOKEN=your-token
 ```
 
 See `mcp/slack/README.md` for full setup documentation.

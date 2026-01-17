@@ -17,7 +17,7 @@ from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
-from db import get_open_tasks, get_identity_statements
+from notion_db import get_open_tasks
 
 # Initialize Anthropic client
 client = Anthropic()
@@ -153,22 +153,14 @@ def process_task(raw_input: str, slack_user: Optional[str] = None, is_thread: bo
     # Get existing tasks for dedup check
     existing_tasks = get_open_tasks()
 
-    # Get identity statements for [IDENTITY] tag matching
-    identity = get_identity_statements()
-
     # Build context for Claude
     existing_tasks_context = ""
     if existing_tasks:
         task_list = "\n".join(
-            f"- [{t['id'][:8]}] {t['content']} (bucket: {t['bucket']}, mentions: {t['times_added']})"
+            f"- [{t['id'][:8]}] {t['content']} (status: {t['status']}, mentions: {t['times_added']})"
             for t in existing_tasks[:50]  # Limit to 50 most recent
         )
         existing_tasks_context = f"\n\n## Existing Open Tasks (check for duplicates)\n{task_list}"
-
-    identity_context = ""
-    if identity:
-        identity_list = "\n".join(f"- {cat}: {stmt}" for cat, stmt in identity.items())
-        identity_context = f"\n\n## User's Identity Goals\n{identity_list}"
 
     # Use appropriate prompt based on input type
     if is_thread:
@@ -177,7 +169,6 @@ def process_task(raw_input: str, slack_user: Optional[str] = None, is_thread: bo
 
 {raw_input}
 {existing_tasks_context}
-{identity_context}
 
 Remember: Respond with JSON only."""
     else:
@@ -186,7 +177,6 @@ Remember: Respond with JSON only."""
 
 "{raw_input}"
 {existing_tasks_context}
-{identity_context}
 
 Remember: Respond with JSON only."""
 
@@ -283,10 +273,12 @@ def format_slack_response(task: dict, is_new: bool = True) -> str:
         if task.get("estimated_minutes"):
             time_str = f" | {task['estimated_minutes']} min"
 
+        # Use status if available (from Notion), fall back to bucket for compatibility
+        status = task.get('status') or task.get('bucket', 'action')
         response = f"""Got it!
 
 "{task['content']}"
-{task['bucket']}{time_str}"""
+{status}{time_str}"""
 
         if tags_str:
             response += f"\n{tags_str}"

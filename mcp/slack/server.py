@@ -16,11 +16,9 @@ from flask import Flask, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 
-from db import (
+from notion_db import (
     create_task,
-    increment_task_mentions,
-    create_dump_session,
-    link_task_to_session
+    increment_task_mentions
 )
 from task_processor import process_task, format_slack_response
 
@@ -124,38 +122,32 @@ def handle_thread_task(client, thread_messages: list[dict], user_id: str, channe
         # Process with Claude - pass full thread context
         processed = process_task(full_context, slack_user=user_id, is_thread=True)
 
-        # Create dump session for tracking
-        session_id = create_dump_session(f"Slack thread: {full_context[:200]}")
-
         if processed.get("is_duplicate") and processed.get("duplicate_of"):
             # Try to increment existing task
             updated_task = increment_task_mentions(processed["duplicate_of"])
             if updated_task:
-                link_task_to_session(processed["duplicate_of"], session_id)
                 response = format_slack_response(updated_task, is_new=False)
             else:
                 # Task ID didn't exist, create new task instead
                 task = create_task(
                     content=processed["content"],
-                    bucket=processed["bucket"],
+                    status=processed["bucket"],  # bucket maps to Notion status
                     estimated_minutes=processed.get("estimated_minutes"),
-                    notes=f"Captured from Slack thread by <@{user_id}>"
+                    notes=f"Captured from Slack thread by <@{user_id}>",
+                    blocked_by=processed.get("blocked_on"),
+                    tags=processed.get("tags", [])
                 )
-                link_task_to_session(task["id"], session_id)
-                task["tags"] = processed.get("tags", [])
                 response = format_slack_response(task, is_new=True)
         else:
             # Create new task
             task = create_task(
                 content=processed["content"],
-                bucket=processed["bucket"],
+                status=processed["bucket"],  # bucket maps to Notion status
                 estimated_minutes=processed.get("estimated_minutes"),
-                notes=f"Captured from Slack thread by <@{user_id}>"
+                notes=f"Captured from Slack thread by <@{user_id}>",
+                blocked_by=processed.get("blocked_on"),
+                tags=processed.get("tags", [])
             )
-            link_task_to_session(task["id"], session_id)
-
-            # Add processed data for response formatting
-            task["tags"] = processed.get("tags", [])
             response = format_slack_response(task, is_new=True)
 
         send_ephemeral(client, channel_id, user_id, response, thread_ts)
@@ -187,21 +179,19 @@ def handle_slash_command(ack, command, client, context):
         logger.info(f"Processing direct task from /mirage: {text[:50]}...")
         try:
             processed = process_task(text, slack_user=user_id, is_thread=False)
-            session_id = create_dump_session(f"Slack /mirage: {text[:200]}")
 
             if processed.get("is_duplicate") and processed.get("duplicate_of"):
                 updated_task = increment_task_mentions(processed["duplicate_of"])
-                link_task_to_session(processed["duplicate_of"], session_id)
                 response = format_slack_response(updated_task, is_new=False)
             else:
                 task = create_task(
                     content=processed["content"],
-                    bucket=processed["bucket"],
+                    status=processed["bucket"],  # bucket maps to Notion status
                     estimated_minutes=processed.get("estimated_minutes"),
-                    notes=f"Captured from Slack /mirage by <@{user_id}>"
+                    notes=f"Captured from Slack /mirage by <@{user_id}>",
+                    blocked_by=processed.get("blocked_on"),
+                    tags=processed.get("tags", [])
                 )
-                link_task_to_session(task["id"], session_id)
-                task["tags"] = processed.get("tags", [])
                 response = format_slack_response(task, is_new=True)
 
             send_ephemeral(client, channel_id, user_id, response)
@@ -279,32 +269,30 @@ def handle_message_shortcut(ack, shortcut, client):
 
     try:
         processed = process_task(full_context, slack_user=user_id, is_thread=is_thread)
-        session_id = create_dump_session(f"Slack shortcut: {full_context[:200]}")
 
         if processed.get("is_duplicate") and processed.get("duplicate_of"):
             updated_task = increment_task_mentions(processed["duplicate_of"])
             if updated_task:
-                link_task_to_session(processed["duplicate_of"], session_id)
                 response = format_slack_response(updated_task, is_new=False)
             else:
                 task = create_task(
                     content=processed["content"],
-                    bucket=processed["bucket"],
+                    status=processed["bucket"],  # bucket maps to Notion status
                     estimated_minutes=processed.get("estimated_minutes"),
-                    notes=f"Captured via message shortcut by <@{user_id}>"
+                    notes=f"Captured via message shortcut by <@{user_id}>",
+                    blocked_by=processed.get("blocked_on"),
+                    tags=processed.get("tags", [])
                 )
-                link_task_to_session(task["id"], session_id)
-                task["tags"] = processed.get("tags", [])
                 response = format_slack_response(task, is_new=True)
         else:
             task = create_task(
                 content=processed["content"],
-                bucket=processed["bucket"],
+                status=processed["bucket"],  # bucket maps to Notion status
                 estimated_minutes=processed.get("estimated_minutes"),
-                notes=f"Captured via message shortcut by <@{user_id}>"
+                notes=f"Captured via message shortcut by <@{user_id}>",
+                blocked_by=processed.get("blocked_on"),
+                tags=processed.get("tags", [])
             )
-            link_task_to_session(task["id"], session_id)
-            task["tags"] = processed.get("tags", [])
             response = format_slack_response(task, is_new=True)
 
         # Keep eyes emoji to show it was captured (don't remove it)

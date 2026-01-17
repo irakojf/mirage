@@ -11,8 +11,8 @@ gunicorn>=21.0.0
 # Claude API
 anthropic>=0.39.0
 
-# Turso (libSQL) database
-libsql-experimental>=0.0.47
+# Notion API (all data storage)
+notion-client>=2.0.0
 
 # Environment variables
 python-dotenv>=1.0.0
