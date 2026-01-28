@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "google-calendar": {
-      "command": "python3.11",
-      "args": ["/Users/irako/Developer/mirage/mcp/google-calendar/server.py"]
+      "command": "python3",
+      "args": ["mcp/google-calendar/server.py"]
     },
     "notion": {
-      "command": "python3.11",
-      "args": ["/Users/irako/Developer/mirage/mcp/notion/server.py"]
+      "command": "python3",
+      "args": ["mcp/notion/server.py"]
     }
   }
 }
