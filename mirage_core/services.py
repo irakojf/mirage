@@ -1,0 +1,113 @@
+"""Pure business logic services orchestrating domain models and ports."""
+
+from __future__ import annotations
+
+from typing import Optional, Sequence
+
+from .aliases import resolve_status, resolve_type
+from .models import Task, TaskId, TaskStatus, TaskType
+from .ports import CalendarPort, ReviewRepository, TaskRepository
+
+PROCRASTINATION_THRESHOLD = 3
+
+
+def flag_procrastinating(tasks: Sequence[Task]) -> list[Task]:
+    """Return tasks that have been mentioned >= threshold times."""
+    return [t for t in tasks if t.mentioned >= PROCRASTINATION_THRESHOLD]
+
+
+def normalize_task_name(raw: str) -> str:
+    """Clean raw capture into actionable task phrasing."""
+    name = raw.strip()
+    for prefix in ("- ", "* ", "• ", "→ "):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return " ".join(name.split())
+
+
+def sort_by_priority(tasks: Sequence[Task]) -> list[Task]:
+    """Sort tasks: explicit priority first (ascending), then by mentioned desc."""
+
+    def key(t: Task) -> tuple:
+        has_priority = t.priority is not None
+        priority_val = t.priority if t.priority is not None else 999
+        return (not has_priority, priority_val, -t.mentioned)
+
+    return sorted(tasks, key=key)
+
+
+def filter_actionable(tasks: Sequence[Task]) -> list[Task]:
+    """Return only tasks in Tasks status (single-sitting, clear next step)."""
+    return [t for t in tasks if t.status == TaskStatus.TASKS]
+
+
+class TaskCaptureService:
+    """Handles task creation with dedup and mention-incrementing."""
+
+    def __init__(self, repo: TaskRepository) -> None:
+        self._repo = repo
+
+    async def capture(
+        self,
+        content: str,
+        status: str,
+        *,
+        blocked_by: Optional[str] = None,
+        tag: Optional[str] = None,
+        complete_time: Optional[int] = None,
+    ) -> Task:
+        """Create a new task, resolving aliases and setting defaults."""
+        resolved = resolve_status(status)
+        task_type = resolve_type(tag) if tag else None
+        name = normalize_task_name(content)
+
+        task = Task(
+            id=TaskId("pending"),
+            name=name,
+            status=resolved,
+            mentioned=1,
+            blocked_by=blocked_by or None,
+            task_type=task_type,
+            complete_time_minutes=complete_time,
+        )
+        return await self._repo.create(task)
+
+    async def increment_mention(self, task_id: str) -> int:
+        """Increment mention counter. Returns new count."""
+        return await self._repo.increment_mentioned(TaskId(task_id))
+
+    async def get_open_tasks(self) -> Sequence[Task]:
+        """Return all non-done tasks for dedup matching."""
+        return await self._repo.query(exclude_done=True)
+
+
+class MirageOrchestrator:
+    """Coordinator that routes capture/prioritize/review flows."""
+
+    def __init__(
+        self,
+        tasks: TaskRepository,
+        reviews: ReviewRepository,
+        calendar: Optional[CalendarPort] = None,
+    ) -> None:
+        self.tasks = tasks
+        self.reviews = reviews
+        self.calendar = calendar
+        self.capture = TaskCaptureService(tasks)
+
+    async def get_do_now_list(self) -> list[Task]:
+        """Return prioritized actionable tasks."""
+        all_tasks = await self.tasks.query(exclude_done=True)
+        actionable = filter_actionable(list(all_tasks))
+        return sort_by_priority(actionable)
+
+    async def get_procrastination_list(self) -> list[Task]:
+        """Return tasks flagged for procrastination (mentioned >= 3)."""
+        all_tasks = await self.tasks.query(exclude_done=True)
+        return flag_procrastinating(list(all_tasks))
+
+    async def get_blocked_tasks(self) -> Sequence[Task]:
+        """Return tasks in Blocked or Waiting On status."""
+        blocked = await self.tasks.query(status=TaskStatus.BLOCKED)
+        waiting = await self.tasks.query(status=TaskStatus.WAITING_ON)
+        return list(blocked) + list(waiting)
