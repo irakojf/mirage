@@ -37,6 +37,16 @@ from .ports import (
     TaskRepository,
 )
 from .ingestion import CaptureRequest, CaptureResult, IngestionService
+from .principles import (
+    DecisionFilter,
+    PrincipleSection,
+    PrinciplesIndex,
+    ThinkingMode,
+    clear_cache,
+    get_principles,
+    load_principles,
+    parse_principles,
+)
 from .services import (
     PROCRASTINATION_THRESHOLD,
     MirageOrchestrator,
@@ -55,6 +65,7 @@ __all__ = [
     "CaptureResult",
     "ConfigError",
     "DependencyError",
+    "DecisionFilter",
     "EnergyLevel",
     "IdentityId",
     "IdentityProfile",
@@ -64,7 +75,9 @@ __all__ = [
     "MirageConfig",
     "MirageCoreError",
     "MirageOrchestrator",
+    "PrinciplesIndex",
     "PROCRASTINATION_THRESHOLD",
+    "PrincipleSection",
     "Project",
     "ProjectId",
     "Review",
@@ -80,7 +93,12 @@ __all__ = [
     "TaskRepository",
     "TaskStatus",
     "TaskType",
+    "ThinkingMode",
     "ValidationError",
+    "clear_cache",
+    "get_principles",
+    "load_principles",
+    "parse_principles",
     "filter_actionable",
     "flag_procrastinating",
     "normalize_task_name",
