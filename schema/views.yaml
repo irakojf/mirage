@@ -1,0 +1,98 @@
+# Notion Views Specification for Mirage Tasks Database
+# Database ID: 2ea35d23-b569-80cc-99be-e6d6a17b1548
+#
+# Defines the intended board/list views in Notion.
+# Use `python schema/kanban_sync.py` to validate or sync.
+
+views:
+  - name: "Board by Status"
+    type: board
+    group_by: Status
+    columns:
+      - name: Tasks
+        color: blue
+        description: "Single sitting, clear next step — do this week"
+      - name: Projects
+        color: purple
+        description: "Multi-step, needs breakdown"
+      - name: Ideas
+        color: yellow
+        description: "Fuzzy, needs more thinking before actionable"
+      - name: "Not Now"
+        color: gray
+        description: "Clear task, but parked — revisit in weekly review"
+      - name: Blocked
+        color: red
+        description: "Waiting on someone/something"
+      - name: "Waiting On"
+        color: orange
+        description: "Explicit external dependency"
+      - name: Done
+        color: green
+        description: "Completed"
+      - name: "Won't Do"
+        color: default
+        description: "Decided against — kept for record"
+    hidden_columns:
+      - Done
+      - "Won't Do"
+    sort:
+      - property: Priority
+        direction: ascending
+      - property: Mentioned
+        direction: descending
+
+  - name: "Board by Type"
+    type: board
+    group_by: Type
+    columns:
+      - name: Identity
+        color: pink
+        description: "Aligns with identity goals"
+      - name: Compound
+        color: green
+        description: "1% improvement, builds over time"
+      - name: "Do It Now"
+        color: blue
+        description: "≤2 min, do immediately"
+      - name: "Never Miss 2x"
+        color: red
+        description: "Skipped yesterday — priority today"
+      - name: "Important Not Urgent"
+        color: purple
+        description: "Eisenhower Q2 — strategic, not urgent"
+      - name: Unblocks
+        color: orange
+        description: "Unlocks other tasks"
+      - name: "No Type"
+        color: default
+        description: "Untagged tasks"
+
+  - name: "Do Now"
+    type: list
+    filter:
+      property: Status
+      status:
+        equals: Tasks
+    sort:
+      - property: Priority
+        direction: ascending
+      - property: Mentioned
+        direction: descending
+
+  - name: "Procrastination Watch"
+    type: list
+    filter:
+      property: Mentioned
+      number:
+        greater_than_or_equal_to: 3
+    sort:
+      - property: Mentioned
+        direction: descending
+
+# Valid status/type combinations for integrity checking
+integrity_rules:
+  # Tasks in "Blocked" status MUST have a Blocked field value
+  blocked_requires_reason: true
+  # Done/Won't Do should NOT have active Priority
+  completed_clears_priority: true

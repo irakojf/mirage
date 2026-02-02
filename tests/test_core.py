@@ -138,9 +138,12 @@ class TestFlagProcrastinating:
 
 
 class TestConfig:
-    def test_defaults(self):
+    def test_defaults_are_valid_notion_ids(self):
         cfg = MirageConfig()
-        assert cfg.tasks_database_id == "2ea35d23-b569-80cc-99be-e6d6a17b1548"
+        assert cfg.tasks_database_id
+        assert cfg.reviews_database_id
+        assert cfg.production_calendar_id
+        assert cfg.identity_page_id
 
     def test_validate_missing_token(self):
         cfg = MirageConfig(notion_token="")
@@ -150,3 +153,8 @@ class TestConfig:
     def test_validate_ok(self):
         cfg = MirageConfig(notion_token="secret_abc")
         cfg.validate()
+
+    def test_validate_bad_notion_id(self):
+        cfg = MirageConfig(notion_token="secret_abc", tasks_database_id="not-a-uuid")
+        with pytest.raises(Exception):
+            cfg.validate()

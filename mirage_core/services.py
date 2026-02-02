@@ -5,7 +5,17 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 from .aliases import resolve_status, resolve_type
-from .models import Task, TaskId, TaskStatus, TaskType
+from .calendar import filter_calendar_fit, safe_get_availability
+from .config import MirageConfig
+from .models import (
+    Availability,
+    AvailabilityQuery,
+    Task,
+    TaskDraft,
+    TaskId,
+    TaskStatus,
+    TaskType,
+)
 from .ports import CalendarPort, ReviewRepository, TaskRepository
 
 PROCRASTINATION_THRESHOLD = 3
@@ -61,8 +71,7 @@ class TaskCaptureService:
         task_type = resolve_type(tag) if tag else None
         name = normalize_task_name(content)
 
-        task = Task(
-            id=TaskId("pending"),
+        draft = TaskDraft(
             name=name,
             status=resolved,
             mentioned=1,
@@ -70,7 +79,7 @@ class TaskCaptureService:
             task_type=task_type,
             complete_time_minutes=complete_time,
         )
-        return await self._repo.create(task)
+        return await self._repo.create(draft)
 
     async def increment_mention(self, task_id: str) -> int:
         """Increment mention counter. Returns new count."""
@@ -89,17 +98,47 @@ class MirageOrchestrator:
         tasks: TaskRepository,
         reviews: ReviewRepository,
         calendar: Optional[CalendarPort] = None,
+        config: Optional[MirageConfig] = None,
     ) -> None:
         self.tasks = tasks
         self.reviews = reviews
         self.calendar = calendar
+        self.config = config or MirageConfig()
         self.capture = TaskCaptureService(tasks)
 
-    async def get_do_now_list(self) -> list[Task]:
-        """Return prioritized actionable tasks."""
+    async def get_do_now_list(
+        self,
+        *,
+        date: Optional[str] = None,
+        enforce_calendar: bool = True,
+    ) -> list[Task]:
+        """Return prioritized actionable tasks, optionally filtered by calendar fit.
+
+        When enforce_calendar is True and a CalendarPort is available,
+        tasks that don't fit in today's free time are excluded.
+        If the calendar is unavailable, all actionable tasks are returned.
+        """
         all_tasks = await self.tasks.query(exclude_done=True)
         actionable = filter_actionable(list(all_tasks))
-        return sort_by_priority(actionable)
+        sorted_tasks = sort_by_priority(actionable)
+
+        if not enforce_calendar or self.calendar is None:
+            return sorted_tasks
+
+        query = AvailabilityQuery(
+            date=date or _today_str(),
+            work_start=self.config.work_start,
+            work_end=self.config.work_end,
+            timezone=self.config.timezone,
+        )
+        availability = await safe_get_availability(self.calendar, query)
+        if availability is None:
+            return sorted_tasks
+
+        fits, _ = filter_calendar_fit(
+            sorted_tasks, availability, self.config.buffer_minutes
+        )
+        return fits
 
     async def get_procrastination_list(self) -> list[Task]:
         """Return tasks flagged for procrastination (mentioned >= 3)."""
@@ -111,3 +150,10 @@ class MirageOrchestrator:
         blocked = await self.tasks.query(status=TaskStatus.BLOCKED)
         waiting = await self.tasks.query(status=TaskStatus.WAITING_ON)
         return list(blocked) + list(waiting)
+
+
+def _today_str() -> str:
+    """Return today's date as YYYY-MM-DD."""
+    from datetime import date
+
+    return date.today().isoformat()

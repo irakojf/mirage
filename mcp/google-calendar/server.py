@@ -14,6 +14,7 @@ import json
 import asyncio
 from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 # MCP SDK imports
 from mcp.server import Server
@@ -26,6 +27,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
+from mirage_core.config import MirageConfig
+
 # OAuth scopes
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
@@ -34,6 +37,19 @@ CREDENTIALS_PATH = os.path.expanduser('~/.config/mirage/credentials.json')
 TOKEN_PATH = os.path.expanduser('~/.config/mirage/token.json')
 
 server = Server("google-calendar")
+
+
+def get_timezone() -> str:
+    """Return configured timezone for calendar operations."""
+    return MirageConfig.from_env().timezone
+
+
+def get_zoneinfo(timezone: str) -> ZoneInfo:
+    """Return ZoneInfo for timezone, falling back to UTC on errors."""
+    try:
+        return ZoneInfo(timezone)
+    except Exception:
+        return ZoneInfo("UTC")
 
 
 def get_calendar_service():
@@ -178,17 +194,22 @@ async def get_free_time(service, args: dict) -> list[TextContent]:
     date_str = args.get("date", datetime.now().strftime("%Y-%m-%d"))
     work_start = args.get("work_start", "09:00")
     work_end = args.get("work_end", "18:00")
+    tz = get_zoneinfo(get_timezone())
 
     # Parse date and work hours
-    date = datetime.strptime(date_str, "%Y-%m-%d")
-    start_dt = datetime.strptime(f"{date_str} {work_start}", "%Y-%m-%d %H:%M")
-    end_dt = datetime.strptime(f"{date_str} {work_end}", "%Y-%m-%d %H:%M")
+    date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz)
+    start_dt = datetime.strptime(
+        f"{date_str} {work_start}", "%Y-%m-%d %H:%M"
+    ).replace(tzinfo=tz)
+    end_dt = datetime.strptime(
+        f"{date_str} {work_end}", "%Y-%m-%d %H:%M"
+    ).replace(tzinfo=tz)
 
     # Get events for the day
     events_result = service.events().list(
         calendarId='primary',
-        timeMin=start_dt.isoformat() + 'Z',
-        timeMax=end_dt.isoformat() + 'Z',
+        timeMin=start_dt.isoformat(),
+        timeMax=end_dt.isoformat(),
         singleEvents=True,
         orderBy='startTime'
     ).execute()
@@ -268,10 +289,11 @@ async def get_week_overview(service, args: dict) -> list[TextContent]:
 
 async def create_event(service, args: dict) -> list[TextContent]:
     """Create a new calendar event."""
+    timezone = get_timezone()
     event = {
         'summary': args['title'],
-        'start': {'dateTime': args['start'], 'timeZone': 'America/Los_Angeles'},
-        'end': {'dateTime': args['end'], 'timeZone': 'America/Los_Angeles'},
+        'start': {'dateTime': args['start'], 'timeZone': timezone},
+        'end': {'dateTime': args['end'], 'timeZone': timezone},
     }
 
     if 'description' in args:
@@ -286,14 +308,15 @@ async def list_events(service, args: dict) -> list[TextContent]:
     """List events for a date range."""
     start_date = args.get("start_date", datetime.now().strftime("%Y-%m-%d"))
     end_date = args.get("end_date", (datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d"))
+    tz = get_zoneinfo(get_timezone())
 
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=tz)
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=tz) + timedelta(days=1)
 
     events_result = service.events().list(
         calendarId='primary',
-        timeMin=start_dt.isoformat() + 'Z',
-        timeMax=end_dt.isoformat() + 'Z',
+        timeMin=start_dt.isoformat(),
+        timeMax=end_dt.isoformat(),
         singleEvents=True,
         orderBy='startTime'
     ).execute()
@@ -313,6 +336,18 @@ async def list_events(service, args: dict) -> list[TextContent]:
 
 async def main():
     """Run the MCP server."""
+    # Fail fast if credentials are missing
+    if not os.path.exists(CREDENTIALS_PATH) and not os.path.exists(TOKEN_PATH):
+        import sys
+        print(
+            f"ERROR: No Google Calendar credentials found.\n"
+            f"  Expected credentials at: {CREDENTIALS_PATH}\n"
+            f"  Or existing token at: {TOKEN_PATH}\n"
+            f"  Download from Google Cloud Console and save to credentials path.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 

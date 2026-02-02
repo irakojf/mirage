@@ -1,0 +1,37 @@
+[
+  {
+    "description": "Simple action task",
+    "input": {"raw_content": "Call mom", "status": "action"},
+    "expected": {"name": "Call mom", "status": "Tasks", "was_created": true}
+  },
+  {
+    "description": "Bullet-prefixed task",
+    "input": {"raw_content": "- Buy groceries", "status": "action"},
+    "expected": {"name": "Buy groceries", "status": "Tasks", "was_created": true}
+  },
+  {
+    "description": "Blocked task with blocker",
+    "input": {"raw_content": "Get designs", "status": "blocked", "blocked_by": "Sarah"},
+    "expected": {"name": "Get designs", "status": "Blocked", "was_created": true}
+  },
+  {
+    "description": "Project task",
+    "input": {"raw_content": "Plan vacation", "status": "project"},
+    "expected": {"name": "Plan vacation", "status": "Projects", "was_created": true}
+  },
+  {
+    "description": "Idea task",
+    "input": {"raw_content": "Start a podcast", "status": "idea"},
+    "expected": {"name": "Start a podcast", "status": "Ideas", "was_created": true}
+  },
+  {
+    "description": "Identity-tagged task",
+    "input": {"raw_content": "Meditate", "status": "action", "tag": "Identity"},
+    "expected": {"name": "Meditate", "status": "Tasks", "task_type": "Identity", "was_created": true}
+  },
+  {
+    "description": "Duplicate detection (second ingestion of same task)",
+    "input": {"raw_content": "Call mom", "status": "action"},
+    "expected": {"is_duplicate": true, "was_created": false}
+  }
+]

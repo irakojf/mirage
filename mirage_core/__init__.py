@@ -6,8 +6,10 @@ implementing decision-making directly.
 
 from .aliases import (
     STATUS_ALIASES,
+    TAG_ALIASES,
     TYPE_ALIASES,
     resolve_status,
+    resolve_tag,
     resolve_type,
 )
 from .calendar import (
@@ -28,6 +30,7 @@ from .errors import (
     MirageCoreError,
     SlottingError,
     ValidationError,
+    set_error_hook,
 )
 from .models import (
     Availability,
@@ -58,7 +61,12 @@ from .ports import (
     ReviewRepository,
     TaskRepository,
 )
-from .ingestion import CaptureRequest, CaptureResult, IngestionService
+from .ingestion import (
+    DEFAULT_ACTION_MINUTES,
+    CaptureRequest,
+    CaptureResult,
+    IngestionService,
+)
 from .principles import (
     DecisionFilter,
     PrincipleSection,
@@ -70,6 +78,26 @@ from .principles import (
     parse_principles,
 )
 from .prioritization import PrioritizationResult, PrioritySuggestion, prioritize
+from .review import (
+    CompletedSummary,
+    EnergyBreakdown,
+    InsightCategory,
+    InsightSeverity,
+    OverrideSummary,
+    PlannedVsDone,
+    ProcrastinationItem,
+    ReviewData,
+    ReviewInsight,
+    ReviewInsightsSummary,
+    ReviewService,
+    generate_insights,
+)
+from .telemetry import (
+    ErrorEvent,
+    capture_error,
+    clear_handlers,
+    register_handler,
+)
 from .services import (
     PROCRASTINATION_THRESHOLD,
     MirageOrchestrator,
@@ -98,6 +126,7 @@ __all__ = [
     "CaptureRequest",
     "CaptureResult",
     "ConfigError",
+    "DEFAULT_ACTION_MINUTES",
     "DependencyError",
     "DecisionFilter",
     "EnergyLevel",
@@ -120,6 +149,7 @@ __all__ = [
     "ReviewRepository",
     "SlottingError",
     "STATUS_ALIASES",
+    "TAG_ALIASES",
     "TYPE_ALIASES",
     "Task",
     "TaskDraft",
@@ -143,6 +173,23 @@ __all__ = [
     "normalize_task_name",
     "prioritize",
     "resolve_status",
+    "resolve_tag",
     "resolve_type",
     "sort_by_priority",
+    "CompletedSummary",
+    "EnergyBreakdown",
+    "InsightCategory",
+    "InsightSeverity",
+    "OverrideSummary",
+    "PlannedVsDone",
+    "ProcrastinationItem",
+    "ReviewData",
+    "ReviewInsight",
+    "ReviewInsightsSummary",
+    "ReviewService",
+    "generate_insights",
+    "ErrorEvent",
+    "capture_error",
+    "clear_handlers",
+    "register_handler",
 ]

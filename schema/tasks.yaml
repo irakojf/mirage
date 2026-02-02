@@ -1,0 +1,108 @@
+# Canonical Schema: Mirage Tasks Database
+# Notion Database ID: 2ea35d23-b569-80cc-99be-e6d6a17b1548
+#
+# This is the single source of truth for the Notion task properties.
+# All MCP servers and the Slack bot MUST conform to this schema.
+# Run `python schema/validate.py` to check for drift.
+
+schema_version: "1.1"
+
+database:
+  name: "Mirage Tasks"
+  id: "2ea35d23-b569-80cc-99be-e6d6a17b1548"
+
+properties:
+  Name:
+    type: title
+    required: true
+    description: "Task description — clear, actionable phrasing"
+
+  Status:
+    type: status
+    required: true
+    default: "Tasks"
+    groups:
+      To-do:
+        - Tasks
+        - Projects
+        - Ideas
+        - "Not Now"
+      "In progress":
+        - Blocked
+        - "Waiting On"
+      Complete:
+        - Done
+        - "Won't Do"
+    description: >
+      Workflow state. Uses Notion's native status type (not select).
+      'Tasks' = single sitting, 'Projects' = multi-step,
+      'Ideas' = fuzzy/needs thinking, 'Not Now' = parked for later,
+      'Blocked' = waiting on someone, 'Waiting On' = explicit dependency,
+      'Done' = completed, 'Won't Do' = decided against.
+
+  Mentioned:
+    type: number
+    required: false
+    default: 1
+    description: >
+      Procrastination counter — incremented each time the task is
+      mentioned. Flag at 3+ for friction analysis.
+
+  Blocked:
+    type: rich_text
+    required: false
+    description: "Who or what is blocking this task (free text)"
+
+  Energy:
+    type: select
+    required: false
+    options:
+      - Red
+      - Yellow
+      - Green
+    description: "Energy level required to complete this task"
+
+  Type:
+    type: select
+    required: false
+    options:
+      - Identity
+      - Compound
+      - Do It Now
+      - Never Miss 2x
+      - Important Not Urgent
+      - Unblocks
+    aliases:
+      Compounds: Compound
+    description: >
+      Task tag for coaching prompts.
+      'Identity' = aligns with identity goals,
+      'Compound' = 1% improvement that builds over time,
+      'Do It Now' = ≤2 min task,
+      'Never Miss 2x' = skipped yesterday,
+      'Important Not Urgent' = Eisenhower Q2,
+      'Unblocks' = unlocks other tasks.
+
+  "Complete Time":
+    type: number
+    required: false
+    description: "Estimated minutes to complete"
+
+  Priority:
+    type: number
+    required: false
+    description: "Priority ranking — 1 = highest"
+
+# Status aliases accepted by MCP tools (mapped to canonical names above)
+status_aliases:
+  Action: Tasks
+  Project: Projects
+  Idea: Ideas
+  action: Tasks
+  project: Projects
+  idea: Ideas
+  blocked: Blocked
+  done: Done
+  "Waiting On": "Waiting On"
+  "Not Now": "Not Now"
+  "Won't Do": "Won't Do"

@@ -26,6 +26,22 @@ TYPE_ALIASES: dict[str, TaskType] = {
     "Compounds": TaskType.COMPOUND,
 }
 
+# Maps AI-processor tag strings (e.g. from Claude prompts) to canonical TaskType.
+TAG_ALIASES: dict[str, TaskType] = {
+    "[DO IT]": TaskType.DO_IT_NOW,
+    "[KEYSTONE]": TaskType.UNBLOCKS,
+    "[COMPOUNDS]": TaskType.COMPOUND,
+    "[IDENTITY]": TaskType.IDENTITY,
+    "[IMPORTANT NOT URGENT]": TaskType.IMPORTANT_NOT_URGENT,
+    "[NEVER MISS 2X]": TaskType.NEVER_MISS_2X,
+    "[UNBLOCKS]": TaskType.UNBLOCKS,
+}
+
+
+def resolve_tag(raw: str) -> TaskType | None:
+    """Resolve an AI-generated tag string to a TaskType, or None if unrecognised."""
+    return TAG_ALIASES.get(raw.upper())
+
 
 def resolve_status(raw: str) -> TaskStatus:
     """Resolve a raw status string to a canonical TaskStatus.

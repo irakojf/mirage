@@ -169,6 +169,106 @@ def test_normalization_strips_bullets():
         assert not result.task.name.startswith(prefix.strip())
 
 
+def test_from_ai_output_basic():
+    ai = {
+        "content": "Call mom",
+        "bucket": "action",
+        "tags": [],
+        "estimated_minutes": 10,
+        "blocked_on": None,
+    }
+    req = CaptureRequest.from_ai_output(ai, source="slack")
+    assert req.raw_content == "Call mom"
+    assert req.status == "action"
+    assert req.complete_time_minutes == 10
+    assert req.source == "slack"
+
+
+def test_from_ai_output_defaults_action_estimate():
+    ai = {"content": "Quick fix", "bucket": "action"}
+    req = CaptureRequest.from_ai_output(ai)
+    from mirage_core.ingestion import DEFAULT_ACTION_MINUTES
+    assert req.complete_time_minutes == DEFAULT_ACTION_MINUTES
+
+
+def test_from_ai_output_project_no_estimate():
+    ai = {"content": "Redesign homepage", "bucket": "project", "estimated_minutes": 60}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.complete_time_minutes is None
+
+
+def test_from_ai_output_resolves_tags():
+    ai = {"content": "Meditate", "bucket": "action", "tags": ["[IDENTITY]"]}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.tag == "Identity"
+
+
+def test_from_ai_output_resolves_keystone():
+    ai = {"content": "Unblock design", "bucket": "action", "tags": ["[KEYSTONE]"]}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.tag == "Unblocks"
+
+
+def test_from_ai_output_do_it():
+    ai = {"content": "Reply to email", "bucket": "action", "tags": ["[DO IT]"]}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.tag == "Do It Now"
+
+
+def test_from_ai_output_blocked():
+    ai = {"content": "Get designs", "bucket": "blocked", "blocked_on": "Sarah"}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.status == "blocked"
+    assert req.blocked_by == "Sarah"
+
+
+def test_from_ai_output_first_tag_wins():
+    ai = {"content": "Task", "bucket": "action", "tags": ["[DO IT]", "[IDENTITY]"]}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.tag == "Do It Now"
+
+
+def test_from_ai_output_unknown_tag_ignored():
+    ai = {"content": "Task", "bucket": "action", "tags": ["[BOGUS]"]}
+    req = CaptureRequest.from_ai_output(ai)
+    assert req.tag is None
+
+
+def test_from_ai_output_end_to_end():
+    """from_ai_output → IngestionService.ingest round-trip."""
+    repo = InMemoryTaskRepo()
+    svc = IngestionService(repo)
+    ai = {
+        "content": "  - Meditate for 5 min  ",
+        "bucket": "action",
+        "tags": ["[IDENTITY]"],
+        "estimated_minutes": 5,
+    }
+    req = CaptureRequest.from_ai_output(ai, source="slack")
+    result = asyncio.run(svc.ingest(req))
+    assert result.was_created is True
+    assert result.task.name == "Meditate for 5 min"
+    assert result.task.status == TaskStatus.TASKS
+
+    from mirage_core import TaskType
+    assert result.task.task_type == TaskType.IDENTITY
+    assert result.task.complete_time_minutes == 5
+
+
+def test_resolve_tag():
+    from mirage_core.aliases import resolve_tag
+    from mirage_core import TaskType
+
+    assert resolve_tag("[DO IT]") == TaskType.DO_IT_NOW
+    assert resolve_tag("[do it]") == TaskType.DO_IT_NOW
+    assert resolve_tag("[KEYSTONE]") == TaskType.UNBLOCKS
+    assert resolve_tag("[COMPOUNDS]") == TaskType.COMPOUND
+    assert resolve_tag("[IDENTITY]") == TaskType.IDENTITY
+    assert resolve_tag("[IMPORTANT NOT URGENT]") == TaskType.IMPORTANT_NOT_URGENT
+    assert resolve_tag("[NEVER MISS 2X]") == TaskType.NEVER_MISS_2X
+    assert resolve_tag("[BOGUS]") is None
+
+
 if __name__ == "__main__":
     test_ingest_new_task()
     test_ingest_duplicate_increments_mentioned()
@@ -176,4 +276,15 @@ if __name__ == "__main__":
     test_ingest_with_blocked()
     test_ingest_with_tag()
     test_normalization_strips_bullets()
+    test_from_ai_output_basic()
+    test_from_ai_output_defaults_action_estimate()
+    test_from_ai_output_project_no_estimate()
+    test_from_ai_output_resolves_tags()
+    test_from_ai_output_resolves_keystone()
+    test_from_ai_output_do_it()
+    test_from_ai_output_blocked()
+    test_from_ai_output_first_tag_wins()
+    test_from_ai_output_unknown_tag_ignored()
+    test_from_ai_output_end_to_end()
+    test_resolve_tag()
     print("All ingestion tests passed!")

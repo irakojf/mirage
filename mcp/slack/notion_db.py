@@ -1,22 +1,113 @@
 """
 Notion database operations for Mirage Slack bot.
 
-Uses Notion API directly (not MCP) since Slack bot runs independently on fly.io.
-Mirrors the db.py interface for task operations.
+Uses Mirage core repositories when available so Slack capture flows share
+one canonical persistence layer. Falls back to direct Notion API calls
+when mirage_core isn't available in the runtime environment.
 """
 
+from __future__ import annotations
+
+import asyncio
+import logging
 import os
+import sys
 from typing import Optional
-from notion_client import Client
+
+logger = logging.getLogger(__name__)
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+_CORE_AVAILABLE = False
+_CORE_IMPORT_ERROR: Optional[Exception] = None
+
+try:
+    from mirage_core.adapters.notion_repo import NotionTaskRepository
+    from mirage_core.config import MirageConfig
+    from mirage_core.models import TaskId
+    from mirage_core.services import TaskCaptureService
+
+    _CORE_AVAILABLE = True
+except Exception as exc:
+    _CORE_IMPORT_ERROR = exc
+
+if not _CORE_AVAILABLE:
+    from notion_client import Client
 
 
-# Configuration
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
-TASKS_DATABASE_ID = "2ea35d23-b569-80cc-99be-e6d6a17b1548"
+# Fallback default comes from MirageConfig when core is available;
+# hardcoded only for the degraded (no mirage_core) path.
+_DEFAULT_TASKS_DB = (
+    MirageConfig.tasks_database_id if _CORE_AVAILABLE else "2ea35d23-b569-80cc-99be-e6d6a17b1548"
+)
+TASKS_DATABASE_ID = os.environ.get("MIRAGE_TASKS_DB", _DEFAULT_TASKS_DB)
+
+_TAG_MAP = {
+    "[DO IT]": "Do It Now",
+    "[KEYSTONE]": "Unblocks",
+    "[COMPOUNDS]": "Compound",
+    "[IDENTITY]": "Identity",
+}
+_TAG_MAP_UPPER = {key.upper(): value for key, value in _TAG_MAP.items()}
+_CANONICAL_TAGS = {
+    "Identity",
+    "Compound",
+    "Do It Now",
+    "Never Miss 2x",
+    "Important Not Urgent",
+    "Unblocks",
+}
 
 
-def get_notion_client() -> Client:
-    """Get authenticated Notion client."""
+# ── Mirage core helpers ─────────────────────────────────────────────────────
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _get_task_repo() -> "NotionTaskRepository":
+    config = MirageConfig.from_env()
+    config.validate()
+    return NotionTaskRepository.from_env(config.tasks_database_id)
+
+
+def _get_capture_service() -> "TaskCaptureService":
+    return TaskCaptureService(_get_task_repo())
+
+
+def _normalize_tag(tags: Optional[list[str]]) -> Optional[str]:
+    if not tags:
+        return None
+    raw = tags[0].strip()
+    if not raw:
+        return None
+    if raw in _CANONICAL_TAGS:
+        return raw
+    mapped = _TAG_MAP_UPPER.get(raw.upper())
+    return mapped
+
+
+def _task_to_payload(task, *, mentioned_override: Optional[int] = None) -> dict:
+    return {
+        "id": task.id.value,
+        "content": task.name,
+        "status": task.status.value,
+        "estimated_minutes": task.complete_time_minutes,
+        "times_added": mentioned_override if mentioned_override is not None else task.mentioned,
+        "notes": None,
+        "url": task.url,
+    }
+
+
+# ── Public API ──────────────────────────────────────────────────────────────
+
+
+def get_notion_client():
+    """Get authenticated Notion client (fallback mode only)."""
     if not NOTION_TOKEN:
         raise ValueError("NOTION_TOKEN environment variable not set")
     return Client(auth=NOTION_TOKEN)
@@ -28,24 +119,27 @@ def create_task(
     estimated_minutes: Optional[int] = None,
     notes: Optional[str] = None,
     blocked_by: Optional[str] = None,
-    tags: Optional[list[str]] = None
+    tags: Optional[list[str]] = None,
 ) -> dict:
-    """
-    Create a new task in the Notion database.
+    """Create a new task in Notion via mirage_core when available."""
+    if _CORE_AVAILABLE:
+        capture = _get_capture_service()
+        tag = _normalize_tag(tags)
+        task = _run(
+            capture.capture(
+                content,
+                status,
+                blocked_by=blocked_by,
+                tag=tag,
+                complete_time=estimated_minutes,
+            )
+        )
+        payload = _task_to_payload(task)
+        payload["notes"] = notes
+        return payload
 
-    Args:
-        content: Task description
-        status: Action/Tasks, Project/Projects, Idea/Ideas, or Blocked
-        estimated_minutes: Time estimate in minutes (not stored - db doesn't have this)
-        notes: Additional notes (not stored - db doesn't have this)
-        blocked_by: Who/what is blocking the task
-        tags: List of tags (only first one used - Identity, Compound)
-
-    Returns the created task dict.
-    """
     notion = get_notion_client()
 
-    # Map bucket names to Notion status names
     STATUS_MAP = {
         "action": "Tasks",
         "Action": "Tasks",
@@ -58,36 +152,31 @@ def create_task(
         "Tasks": "Tasks",
         "Projects": "Projects",
         "Ideas": "Ideas",
+        "Not Now": "Not Now",
+        "Waiting On": "Waiting On",
+        "Won't Do": "Won't Do",
+        "Done": "Done",
     }
     notion_status = STATUS_MAP.get(status, status)
 
-    # Build properties
     properties = {
-        "Name": {
-            "title": [{"text": {"content": content}}]
-        },
-        "Status": {
-            "status": {"name": notion_status}
-        },
-        "Mentioned": {
-            "number": 1  # First mention
-        }
+        "Name": {"title": [{"text": {"content": content}}]},
+        "Status": {"status": {"name": notion_status}},
+        "Mentioned": {"number": 1},
     }
 
     if blocked_by:
-        properties["Blocked"] = {
-            "rich_text": [{"text": {"content": blocked_by}}]
-        }
+        properties["Blocked"] = {"rich_text": [{"text": {"content": blocked_by}}]}
 
     if tags and len(tags) > 0:
-        # Type is single-select, use first tag
-        properties["Type"] = {
-            "select": {"name": tags[0]}
-        }
+        properties["Type"] = {"select": {"name": tags[0]}}
+
+    if estimated_minutes is not None:
+        properties["Complete Time"] = {"number": estimated_minutes}
 
     page = notion.pages.create(
         parent={"database_id": TASKS_DATABASE_ID},
-        properties=properties
+        properties=properties,
     )
 
     return {
@@ -97,68 +186,81 @@ def create_task(
         "estimated_minutes": estimated_minutes,
         "times_added": 1,
         "notes": notes,
-        "url": page.get("url")
+        "url": page.get("url"),
     }
 
 
 def get_open_tasks() -> list[dict]:
-    """
-    Get all open tasks for semantic matching.
+    """Get all open tasks for semantic matching."""
+    if _CORE_AVAILABLE:
+        repo = _get_task_repo()
+        tasks = _run(repo.query(exclude_done=True))
+        return [
+            {
+                "id": task.id.value,
+                "content": task.name,
+                "status": task.status.value,
+                "times_added": task.mentioned,
+            }
+            for task in tasks
+        ]
 
-    Returns list of task dicts with id, content, status, times_added.
-    Excludes Done tasks.
-    """
     notion = get_notion_client()
 
     response = notion.databases.query(
         database_id=TASKS_DATABASE_ID,
-        filter={
-            "property": "Status",
-            "status": {"does_not_equal": "Done"}
-        }
+        filter={"property": "Status", "status": {"does_not_equal": "Done"}},
     )
 
     tasks = []
     for page in response.get("results", []):
         props = page.get("properties", {})
-        tasks.append({
-            "id": page["id"],
-            "content": _extract_title(props),
-            "status": _extract_status(props, "Status"),
-            "times_added": _extract_number(props, "Mentioned") or 1
-        })
+        tasks.append(
+            {
+                "id": page["id"],
+                "content": _extract_title(props),
+                "status": _extract_status(props, "Status"),
+                "times_added": _extract_number(props, "Mentioned") or 1,
+            }
+        )
 
     return tasks
 
 
 def increment_task_mentions(page_id: str) -> Optional[dict]:
-    """
-    Increment the Mentioned count for an existing task.
+    """Increment the Mentioned count for an existing task."""
+    if _CORE_AVAILABLE:
+        repo = _get_task_repo()
+        capture = TaskCaptureService(repo)
+        new_count = _run(capture.increment_mention(page_id))
+        task = _run(repo.get(TaskId(page_id)))
+        if not task:
+            return None
+        return {
+            "id": page_id,
+            "content": task.name,
+            "status": task.status.value,
+            "times_added": new_count,
+        }
 
-    Returns the updated task dict, or None if task doesn't exist.
-    """
     notion = get_notion_client()
 
     try:
-        # Get current mention count
         page = notion.pages.retrieve(page_id=page_id)
         props = page.get("properties", {})
         current_count = _extract_number(props, "Mentioned") or 0
 
-        # Increment and update
         new_count = current_count + 1
-        updated_page = notion.pages.update(
+        notion.pages.update(
             page_id=page_id,
-            properties={
-                "Mentioned": {"number": new_count}
-            }
+            properties={"Mentioned": {"number": new_count}},
         )
 
         return {
             "id": page_id,
             "content": _extract_title(props),
-            "status": _extract_select(props, "Status"),
-            "times_added": new_count
+            "status": _extract_status(props, "Status"),
+            "times_added": new_count,
         }
 
     except Exception:
@@ -166,11 +268,22 @@ def increment_task_mentions(page_id: str) -> Optional[dict]:
 
 
 def find_task_by_id(page_id: str) -> Optional[dict]:
-    """
-    Fetch a single task by page ID.
+    """Fetch a single task by page ID."""
+    if _CORE_AVAILABLE:
+        repo = _get_task_repo()
+        task = _run(repo.get(TaskId(page_id)))
+        if not task:
+            return None
+        return {
+            "id": task.id.value,
+            "content": task.name,
+            "status": task.status.value,
+            "times_added": task.mentioned,
+            "blocked_by": task.blocked_by,
+            "energy": task.energy.value if task.energy else None,
+            "tag": task.task_type.value if task.task_type else None,
+        }
 
-    Returns task dict or None if not found.
-    """
     notion = get_notion_client()
 
     try:
@@ -184,16 +297,17 @@ def find_task_by_id(page_id: str) -> Optional[dict]:
             "times_added": _extract_number(props, "Mentioned") or 1,
             "blocked_by": _extract_text(props, "Blocked"),
             "energy": _extract_select(props, "Energy"),
-            "tag": _extract_select(props, "Type")
+            "tag": _extract_select(props, "Type"),
         }
 
     except Exception:
         return None
 
 
-# ============================================================================
-# Helper functions for extracting Notion properties
-# ============================================================================
+# ==========================================================================
+# Helper functions for extracting Notion properties (fallback mode only)
+# ==========================================================================
+
 
 def _extract_title(props: dict) -> str:
     """Extract title from properties."""

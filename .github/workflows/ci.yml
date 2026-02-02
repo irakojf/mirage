@@ -27,6 +27,9 @@ jobs:
       - name: Tests
         run: |
           python -m pytest
-      - name: Schema validation
+      - name: Schema validation (parse)
         run: |
           python schema/validate.py --dry-run
+      - name: Schema validation (enum drift check)
+        run: |
+          python schema/validate.py --check-enums

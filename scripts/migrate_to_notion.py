@@ -26,7 +26,10 @@ from notion_client import Client
 TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
-TASKS_DATABASE_ID = "2ea35d23-b569-80cc-99be-e6d6a17b1548"
+
+from mirage_core.config import MirageConfig
+
+TASKS_DATABASE_ID = os.environ.get("MIRAGE_TASKS_DB", MirageConfig.tasks_database_id)
 
 # Status mapping: Turso bucket -> Notion status
 # Turso uses: bucket (action/project/idea/blocked) + status (open/done/archived)

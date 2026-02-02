@@ -15,6 +15,16 @@ import logging
 from typing import Optional
 from anthropic import Anthropic
 
+try:
+    from mirage_core.services import normalize_task_name as _normalize_task_name
+except Exception:  # pragma: no cover - fallback when mirage_core isn't on path
+    def _normalize_task_name(raw: str) -> str:
+        name = raw.strip()
+        for prefix in ("- ", "* ", "• ", "→ "):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        return " ".join(name.split())
+
 logger = logging.getLogger(__name__)
 
 from notion_db import get_open_tasks
@@ -243,6 +253,8 @@ Remember: Respond with JSON only."""
     result.setdefault("duplicate_of", None)
     result.setdefault("blocked_on", None)
 
+    result["content"] = _normalize_task_name(result["content"])
+
     # Ensure action tasks have an estimate (default to 5 min if Claude didn't provide)
     if result.get("bucket") == "action" and not result.get("estimated_minutes"):
         result["estimated_minutes"] = 5
@@ -407,6 +419,8 @@ Remember: Respond with a JSON array only."""
         result.setdefault("is_duplicate", False)
         result.setdefault("duplicate_of", None)
         result.setdefault("blocked_on", None)
+
+        result["content"] = _normalize_task_name(result["content"])
 
         # Ensure action tasks have an estimate
         if result.get("bucket") == "action" and not result.get("estimated_minutes"):

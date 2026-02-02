@@ -22,7 +22,24 @@ Goal: logs should explain what happened without leaking secrets.
 - `operation`: the action taken (create_task, update_task, list_events)
 - `duration_ms`: elapsed time when possible
 
+## Redaction Policy
+
+**Never log:**
+- API tokens or secrets (NOTION_TOKEN, SLACK_BOT_TOKEN, ANTHROPIC_API_KEY)
+- Full user messages or task content in production (truncate to 50 chars max)
+- Slack user IDs in combination with message content
+- Google Calendar event details beyond title
+
+**Safe to log:**
+- Notion page IDs (opaque UUIDs)
+- Task status transitions
+- Operation names and durations
+- Error types and messages (but not stack traces at INFO level)
+- Counts (task count, mention count)
+
+**Truncation rule:** When logging user-provided text (task names, messages), truncate to 50 characters with `text[:50]` and append `...` to indicate truncation.
+
 ## Examples
 
-- Good: "notion.create_task succeeded", {task_id, duration_ms}
-- Bad: "failed to create task" with no task_id or error details
+- Good: `logger.info("notion.create_task succeeded", extra={"task_id": task.id, "duration_ms": 120})`
+- Bad: `logger.info(f"created task: {full_task_content}")` — leaks user content

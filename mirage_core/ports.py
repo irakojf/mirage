@@ -10,7 +10,8 @@ from abc import ABC, abstractmethod
 from typing import Optional, Sequence
 
 from .models import (
-    Availability,
+    AvailabilityQuery,
+    AvailabilityReport,
     IdentityProfile,
     Review,
     Task,
@@ -18,6 +19,8 @@ from .models import (
     TaskId,
     TaskMutation,
     TaskStatus,
+    WeekOverview,
+    WeekOverviewQuery,
 )
 
 
@@ -74,9 +77,9 @@ class CalendarPort(ABC):
     """Read access to calendar availability."""
 
     @abstractmethod
-    async def get_availability(self, date: str) -> Availability:
+    async def get_availability(self, query: AvailabilityQuery) -> AvailabilityReport:
         """Return free time blocks for a given date (YYYY-MM-DD)."""
 
     @abstractmethod
-    async def get_week_overview(self) -> dict:
-        """Return busy/free summary for the current week."""
+    async def get_week_overview(self, query: WeekOverviewQuery) -> WeekOverview:
+        """Return busy/free summary for the requested week."""

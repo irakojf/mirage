@@ -12,11 +12,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
-from .aliases import resolve_status, resolve_type
+from .aliases import resolve_status, resolve_tag, resolve_type
 from .errors import ValidationError
 from .models import Task, TaskDraft, TaskId, TaskStatus, TaskType
 from .ports import TaskRepository
 from .services import normalize_task_name
+
+DEFAULT_ACTION_MINUTES = 5
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,56 @@ class CaptureRequest:
     def __post_init__(self) -> None:
         if not self.raw_content or not self.raw_content.strip():
             raise ValidationError("CaptureRequest raw_content cannot be empty")
+
+    @classmethod
+    def from_ai_output(cls, ai: dict, *, source: str = "ai") -> "CaptureRequest":
+        """Build a CaptureRequest from an AI processor's JSON output.
+
+        Expected keys (all optional except ``content``):
+            content            – cleaned task text
+            bucket             – "action" | "project" | "idea" | "blocked"
+            tags               – list of tag strings, e.g. ["[DO IT]"]
+            blocked_on         – who/what is blocking (string)
+            estimated_minutes  – int or None
+
+        Bucket is resolved via ``resolve_status`` (aliases accept
+        "action" → Tasks, "project" → Projects, etc.).
+        The first recognised tag is mapped to a ``TaskType`` via
+        ``resolve_tag``.  Action-bucket tasks without an explicit
+        estimate default to ``DEFAULT_ACTION_MINUTES``.
+        """
+        content: str = ai.get("content", "").strip()
+        if not content:
+            raise ValidationError("AI output must include non-empty 'content'")
+
+        bucket: str = ai.get("bucket", "action")
+        tags: list[str] = ai.get("tags") or []
+        blocked_on: str | None = ai.get("blocked_on")
+        estimated: int | None = ai.get("estimated_minutes")
+
+        # Resolve first recognised tag → TaskType
+        resolved_tag: TaskType | None = None
+        for t in tags:
+            resolved_tag = resolve_tag(t)
+            if resolved_tag is not None:
+                break
+
+        # Default estimate for action tasks
+        if bucket == "action" and not estimated:
+            estimated = DEFAULT_ACTION_MINUTES
+
+        # Non-action tasks shouldn't carry an estimate
+        if bucket != "action":
+            estimated = None
+
+        return cls(
+            raw_content=content,
+            status=bucket,
+            blocked_by=blocked_on,
+            tag=resolved_tag.value if resolved_tag else None,
+            complete_time_minutes=estimated,
+            source=source,
+        )
 
 
 @dataclass(frozen=True)

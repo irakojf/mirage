@@ -10,6 +10,7 @@ Provides tools to:
 """
 
 import os
+import sys
 import json
 import asyncio
 from datetime import datetime, timedelta
@@ -23,23 +24,58 @@ from mcp.types import Tool, TextContent
 # Notion SDK
 from notion_client import Client
 
-# Configuration
-NOTION_TOKEN = os.environ.get('NOTION_TOKEN') or os.environ.get('NOTION_API_KEY')
-PRODUCTION_CALENDAR_ID = "28535d23-b569-80d3-b186-d1886bc53f0b"  # Shapeshift Production Calendar database
-TASKS_DATABASE_ID = "2ea35d23-b569-80cc-99be-e6d6a17b1548"  # Mirage Tasks database
-REVIEWS_DATABASE_ID = "2eb35d23-b569-8040-859f-d5baff2957ab"  # Mirage Reviews database
+# Core imports — status/type resolution from single source of truth
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+from mirage_core.adapters.notion_repo import (
+    NotionReviewRepository,
+    NotionTaskRepository,
+)
+from mirage_core.aliases import resolve_status, resolve_type
+from mirage_core.config import MirageConfig
+from mirage_core.models import EnergyLevel, Review, ReviewId, TaskId, TaskMutation
+from mirage_core.services import TaskCaptureService, normalize_task_name
+
+# Configuration — load from env with validation
+_config = MirageConfig.from_env()
+PRODUCTION_CALENDAR_ID = _config.production_calendar_id
+TASKS_DATABASE_ID = _config.tasks_database_id
+REVIEWS_DATABASE_ID = _config.reviews_database_id
 
 server = Server("notion")
 
 
 def get_notion_client():
     """Get authenticated Notion client."""
-    if not NOTION_TOKEN:
-        raise ValueError(
-            "Notion API token not found.\n"
-            "Set NOTION_TOKEN environment variable or add to ~/.config/mirage/notion-token"
-        )
-    return Client(auth=NOTION_TOKEN)
+    _config.validate()
+    return Client(auth=_config.notion_token)
+
+
+def get_task_repo() -> NotionTaskRepository:
+    """Get task repository backed by Notion."""
+    _config.validate()
+    return NotionTaskRepository.from_env(TASKS_DATABASE_ID)
+
+
+def get_review_repo() -> NotionReviewRepository:
+    """Get review repository backed by Notion."""
+    _config.validate()
+    return NotionReviewRepository.from_env(REVIEWS_DATABASE_ID)
+
+
+def _task_to_payload(task) -> dict:
+    return {
+        "id": task.id.value,
+        "content": task.name,
+        "status": task.status.value,
+        "mentioned": task.mentioned,
+        "blocked_by": task.blocked_by,
+        "energy": task.energy.value if task.energy else None,
+        "tags": task.task_type.value if task.task_type else None,
+        "complete_time": task.complete_time_minutes,
+        "priority": task.priority,
+        "created_time": task.created_at.isoformat() if task.created_at else "",
+        "url": task.url,
+    }
 
 
 @server.list_tools()
@@ -241,6 +277,18 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+def _error_response(tool_name: str, error: Exception) -> list[TextContent]:
+    """Build a consistent error response for any tool failure."""
+    error_type = type(error).__name__
+    payload = json.dumps({
+        "error": True,
+        "tool": tool_name,
+        "type": error_type,
+        "message": str(error),
+    })
+    return [TextContent(type="text", text=payload)]
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Handle tool calls."""
@@ -264,9 +312,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         elif name == "update_page_content":
             return await update_page_content(notion, arguments)
         else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+            return _error_response(name, ValueError(f"Unknown tool: {name}"))
     except Exception as e:
-        return [TextContent(type="text", text=f"Error: {str(e)}")]
+        return _error_response(name, e)
 
 
 async def get_production_calendar(notion: Client, args: dict) -> list[TextContent]:
@@ -341,7 +389,7 @@ async def get_production_calendar(notion: Client, args: dict) -> list[TextConten
 
     except Exception as e:
         # If database query fails, try fetching as a page
-        return [TextContent(type="text", text=f"Could not query database: {str(e)}\nMake sure the integration has access to this page.")]
+        return _error_response("get_production_calendar", e)
 
 
 async def get_notion_page(notion: Client, args: dict) -> list[TextContent]:
@@ -399,55 +447,20 @@ async def query_tasks(notion: Client, args: dict) -> list[TextContent]:
     status_filter = args.get("status_filter")
     exclude_done = args.get("exclude_done", False)
 
-    # Build filter - Status is a "status" type property
-    filter_obj = None
-    if status_filter:
-        filter_obj = {
-            "property": "Status",
-            "status": {"equals": status_filter}
-        }
-    elif exclude_done:
-        filter_obj = {
-            "and": [
-                {"property": "Status", "status": {"does_not_equal": "Done"}},
-                {"property": "Status", "status": {"does_not_equal": "Won't Do"}}
-            ]
-        }
-
     try:
-        query_args = {"database_id": TASKS_DATABASE_ID}
-        if filter_obj:
-            query_args["filter"] = filter_obj
-
-        response = notion.databases.query(**query_args)
-
-        tasks = []
-        for page in response.get("results", []):
-            props = page.get("properties", {})
-            task = {
-                "id": page["id"],
-                "content": extract_title(props),
-                "status": extract_status(props, "Status"),
-                "mentioned": extract_number(props, "Mentioned"),
-                "blocked_by": extract_text(props, "Blocked"),
-                "energy": extract_select(props, "Energy"),
-                "tags": extract_select(props, "Type"),  # Type is single-select
-                "complete_time": extract_number(props, "Complete Time"),
-                "priority": extract_number(props, "Priority"),
-                "created_time": page.get("created_time", ""),
-                "url": page.get("url")
-            }
-            tasks.append(task)
+        repo = get_task_repo()
+        status = resolve_status(status_filter) if status_filter else None
+        tasks = await repo.query(status=status, exclude_done=exclude_done)
 
         result = {
-            "tasks": tasks,
-            "count": len(tasks)
+            "tasks": [_task_to_payload(task) for task in tasks],
+            "count": len(tasks),
         }
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error querying tasks: {str(e)}")]
+        return _error_response("query_tasks", e)
 
 
 async def create_task(notion: Client, args: dict) -> list[TextContent]:
@@ -455,146 +468,60 @@ async def create_task(notion: Client, args: dict) -> list[TextContent]:
     content = args["content"]
     status = args["status"]
     blocked_by = args.get("blocked_by")
-    tag = args.get("tag")  # Single tag: Identity, Compound
-    complete_time = args.get("complete_time")  # Estimated minutes
-
-    # Map bucket names to Notion status names
-    STATUS_MAP = {
-        "Action": "Tasks",
-        "Project": "Projects",
-        "Idea": "Ideas",
-        "Blocked": "Blocked",
-        "Waiting On": "Waiting On",
-        "Not Now": "Not Now",
-        "Won't Do": "Won't Do",
-        "Done": "Done",
-        # Also accept Notion names directly
-        "Tasks": "Tasks",
-        "Projects": "Projects",
-        "Ideas": "Ideas",
-    }
-    notion_status = STATUS_MAP.get(status, status)
-
-    # Build properties
-    properties = {
-        "Name": {
-            "title": [{"text": {"content": content}}]
-        },
-        "Status": {
-            "status": {"name": notion_status}
-        },
-        "Mentioned": {
-            "number": 1  # First mention
-        }
-    }
-
-    if blocked_by:
-        properties["Blocked"] = {
-            "rich_text": [{"text": {"content": blocked_by}}]
-        }
-
-    if tag:
-        properties["Type"] = {
-            "select": {"name": tag}
-        }
-
-    if complete_time is not None:
-        properties["Complete Time"] = {
-            "number": complete_time
-        }
+    tag = args.get("tag")
+    complete_time = args.get("complete_time")
 
     try:
-        page = notion.pages.create(
-            parent={"database_id": TASKS_DATABASE_ID},
-            properties=properties
+        repo = get_task_repo()
+        capture = TaskCaptureService(repo)
+        task = await capture.capture(
+            content,
+            status,
+            blocked_by=blocked_by,
+            tag=tag,
+            complete_time=complete_time,
         )
 
-        result = {
-            "success": True,
-            "id": page["id"],
-            "content": content,
-            "status": notion_status,
-            "url": page.get("url")
-        }
-
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        payload = _task_to_payload(task)
+        payload["success"] = True
+        return [TextContent(type="text", text=json.dumps(payload, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error creating task: {str(e)}")]
+        return _error_response("create_task", e)
 
 
 async def update_task(notion: Client, args: dict) -> list[TextContent]:
     """Update an existing task in the Mirage tasks database."""
     page_id = args["page_id"]
 
-    # Status mapping
-    STATUS_MAP = {
-        "Action": "Tasks",
-        "Project": "Projects",
-        "Idea": "Ideas",
-        "Blocked": "Blocked",
-        "Waiting On": "Waiting On",
-        "Not Now": "Not Now",
-        "Won't Do": "Won't Do",
-        "Done": "Done",
-        "Tasks": "Tasks",
-        "Projects": "Projects",
-        "Ideas": "Ideas",
-    }
-
-    # Build properties to update
-    properties = {}
-
-    if "content" in args:
-        properties["Name"] = {
-            "title": [{"text": {"content": args["content"]}}]
-        }
-
-    if "status" in args:
-        notion_status = STATUS_MAP.get(args["status"], args["status"])
-        properties["Status"] = {"status": {"name": notion_status}}
-
-    if "mentioned" in args:
-        properties["Mentioned"] = {"number": args["mentioned"]}
-
-    if "blocked_by" in args:
-        properties["Blocked"] = {
-            "rich_text": [{"text": {"content": args["blocked_by"]}}]
-        }
-
-    if "energy" in args:
-        # Capitalize first letter for Notion
-        energy = args["energy"].capitalize()
-        properties["Energy"] = {"select": {"name": energy}}
-
-    if "tag" in args:
-        properties["Type"] = {"select": {"name": args["tag"]}}
-
-    if "complete_time" in args:
-        properties["Complete Time"] = {"number": args["complete_time"]}
-
-    if "priority" in args:
-        properties["Priority"] = {"number": args["priority"]}
-
-    if not properties:
-        return [TextContent(type="text", text="No properties to update")]
+    energy = None
+    if "energy" in args and args["energy"]:
+        try:
+            energy = EnergyLevel(args["energy"].capitalize())
+        except ValueError as exc:
+            return [TextContent(type="text", text=f"Invalid energy value: {exc}")]
 
     try:
-        page = notion.pages.update(page_id=page_id, properties=properties)
+        mutation = TaskMutation(
+            task_id=TaskId(page_id),
+            name=normalize_task_name(args["content"]) if "content" in args else None,
+            status=resolve_status(args["status"]) if "status" in args else None,
+            mentioned=args.get("mentioned"),
+            blocked_by=args.get("blocked_by"),
+            energy=energy,
+            task_type=resolve_type(args["tag"]) if "tag" in args else None,
+            complete_time_minutes=args.get("complete_time"),
+            priority=args.get("priority"),
+        )
 
-        props = page.get("properties", {})
-        result = {
-            "success": True,
-            "id": page["id"],
-            "content": extract_title(props),
-            "status": extract_status(props, "Status"),
-            "url": page.get("url")
-        }
-
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        repo = get_task_repo()
+        task = await repo.update(mutation)
+        payload = _task_to_payload(task)
+        payload["success"] = True
+        return [TextContent(type="text", text=json.dumps(payload, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error updating task: {str(e)}")]
+        return _error_response("update_task", e)
 
 
 async def increment_task_mention(notion: Client, args: dict) -> list[TextContent]:
@@ -602,24 +529,15 @@ async def increment_task_mention(notion: Client, args: dict) -> list[TextContent
     page_id = args["page_id"]
 
     try:
-        # First, get current mention count
-        page = notion.pages.retrieve(page_id=page_id)
-        props = page.get("properties", {})
-        current_count = extract_number(props, "Mentioned") or 0
-
-        # Increment and update
-        new_count = current_count + 1
-        updated_page = notion.pages.update(
-            page_id=page_id,
-            properties={
-                "Mentioned": {"number": new_count}
-            }
-        )
+        repo = get_task_repo()
+        task = await repo.get(TaskId(page_id))
+        current_count = task.mentioned if task else 0
+        new_count = await repo.increment_mentioned(TaskId(page_id))
 
         result = {
             "success": True,
             "id": page_id,
-            "content": extract_title(props),
+            "content": task.name if task else "",
             "previous_count": current_count,
             "new_count": new_count
         }
@@ -627,64 +545,48 @@ async def increment_task_mention(notion: Client, args: dict) -> list[TextContent
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error incrementing mention: {str(e)}")]
+        return _error_response("increment_task_mention", e)
 
 
 async def create_review(notion: Client, args: dict) -> list[TextContent]:
     """Create a weekly review record in the Mirage reviews database."""
-    week_of = args["week_of"]
+    week_of_raw = args["week_of"]
     transcript = args["transcript"]
     wins = args.get("wins", "")
     struggles = args.get("struggles", "")
     next_week_focus = args.get("next_week_focus", "")
     tasks_completed = args.get("tasks_completed")
 
-    # Build properties
-    properties = {
-        "Name": {
-            "title": [{"text": {"content": f"Week of {week_of}"}}]
-        },
-        "Transcript": {
-            "rich_text": [{"text": {"content": transcript[:2000]}}]  # Notion limit
-        }
-    }
-
-    # Optional properties - add if provided
-    if wins:
-        properties["Wins"] = {
-            "rich_text": [{"text": {"content": wins}}]
-        }
-
-    if struggles:
-        properties["Struggles"] = {
-            "rich_text": [{"text": {"content": struggles}}]
-        }
-
-    if next_week_focus:
-        properties["Next Week Focus"] = {
-            "rich_text": [{"text": {"content": next_week_focus}}]
-        }
-
-    if tasks_completed is not None:
-        properties["Tasks Completed"] = {"number": tasks_completed}
-
     try:
-        page = notion.pages.create(
-            parent={"database_id": REVIEWS_DATABASE_ID},
-            properties=properties
+        try:
+            week_of = datetime.fromisoformat(week_of_raw)
+        except ValueError:
+            week_of = datetime.strptime(week_of_raw, "%Y-%m-%d")
+
+        review = Review(
+            id=ReviewId("pending"),
+            week_of=week_of,
+            transcript=transcript,
+            wins=wins or None,
+            struggles=struggles or None,
+            next_week_focus=next_week_focus or None,
+            tasks_completed=tasks_completed,
         )
+
+        repo = get_review_repo()
+        saved = await repo.create(review)
 
         result = {
             "success": True,
-            "id": page["id"],
-            "week_of": week_of,
-            "url": page.get("url")
+            "id": saved.id.value,
+            "week_of": week_of_raw,
+            "url": saved.url,
         }
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error creating review: {str(e)}")]
+        return _error_response("create_review", e)
 
 
 async def update_page_content(notion: Client, args: dict) -> list[TextContent]:
@@ -714,7 +616,7 @@ async def update_page_content(notion: Client, args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        return [TextContent(type="text", text=f"Error updating page content: {str(e)}")]
+        return _error_response("update_page_content", e)
 
 
 def parse_markdown_to_blocks(content: str) -> list[dict]:
@@ -860,6 +762,13 @@ def extract_rich_text(rich_text: list) -> str:
 
 async def main():
     """Run the MCP server."""
+    # Fail fast if required config is missing
+    try:
+        _config.validate()
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 

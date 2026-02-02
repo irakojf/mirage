@@ -11,6 +11,8 @@ from notion_client import Client
 from ..errors import DependencyError, ValidationError
 from ..models import (
     EnergyLevel,
+    Review,
+    ReviewId,
     Task,
     TaskDraft,
     TaskId,
@@ -19,6 +21,7 @@ from ..models import (
     TaskType,
 )
 from ..ports import TaskRepository
+from ..ports import ReviewRepository
 
 
 class NotionTaskRepository(TaskRepository):
@@ -118,6 +121,40 @@ class NotionTaskRepository(TaskRepository):
         return new_count
 
 
+class NotionReviewRepository(ReviewRepository):
+    """Review repository backed by the Mirage Notion database."""
+
+    def __init__(self, client: Client, database_id: str) -> None:
+        self._client = client
+        self._database_id = database_id
+
+    @classmethod
+    def from_env(cls, database_id: str) -> "NotionReviewRepository":
+        token = _get_notion_token()
+        return cls(Client(auth=token), database_id)
+
+    async def create(self, review: Review) -> Review:
+        properties = _properties_from_review(review)
+
+        def _run_create() -> dict:
+            return self._client.pages.create(
+                parent={"database_id": self._database_id},
+                properties=properties,
+            )
+
+        page = await asyncio.to_thread(_run_create)
+        return Review(
+            id=ReviewId(page.get("id", "")),
+            week_of=review.week_of,
+            transcript=review.transcript,
+            wins=review.wins,
+            struggles=review.struggles,
+            next_week_focus=review.next_week_focus,
+            tasks_completed=review.tasks_completed,
+            url=page.get("url"),
+        )
+
+
 def _get_notion_token() -> str:
     token = _get_env("NOTION_TOKEN") or _get_env("NOTION_API_KEY")
     if not token:
@@ -168,6 +205,7 @@ def _task_from_page(page: dict) -> Task:
         priority=_extract_number(props, "Priority"),
         created_at=_parse_time(page.get("created_time")),
         updated_at=_parse_time(page.get("last_edited_time")),
+        url=page.get("url"),
     )
 
 
@@ -228,6 +266,32 @@ def _properties_from_mutation(mutation: TaskMutation) -> dict:
     return properties
 
 
+def _properties_from_review(review: Review) -> dict:
+    week_of = review.week_of.strftime("%Y-%m-%d")
+    transcript = _truncate_text(review.transcript, 2000)
+
+    properties = {
+        "Name": {"title": [{"text": {"content": f"Week of {week_of}"}}]},
+        "Transcript": {"rich_text": [{"text": {"content": transcript}}]},
+    }
+
+    if review.wins:
+        properties["Wins"] = {"rich_text": [{"text": {"content": review.wins}}]}
+
+    if review.struggles:
+        properties["Struggles"] = {"rich_text": [{"text": {"content": review.struggles}}]}
+
+    if review.next_week_focus:
+        properties["Next Week Focus"] = {
+            "rich_text": [{"text": {"content": review.next_week_focus}}]
+        }
+
+    if review.tasks_completed is not None:
+        properties["Tasks Completed"] = {"number": review.tasks_completed}
+
+    return properties
+
+
 def _extract_title(props: dict) -> str:
     for value in props.values():
         if value.get("type") == "title":
@@ -272,3 +336,9 @@ def _parse_time(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _truncate_text(value: str, max_len: int) -> str:
+    if len(value) <= max_len:
+        return value
+    return value[:max_len]

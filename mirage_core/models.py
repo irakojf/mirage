@@ -81,17 +81,126 @@ class AvailabilityWindow:
         if self.end <= self.start:
             raise ValidationError("AvailabilityWindow end must be after start")
 
+    @property
+    def duration_minutes(self) -> int:
+        """Duration of this free block in minutes."""
+        return int((self.end - self.start).total_seconds() / 60)
+
+    def fits(self, minutes: int) -> bool:
+        """Check if a task of given duration fits in this window."""
+        return self.duration_minutes >= minutes
+
 
 @dataclass(frozen=True)
 class Availability:
     windows: Sequence[AvailabilityWindow]
+    date: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if not self.windows:
-            raise ValidationError("Availability requires at least one window")
+        if not isinstance(self.windows, (list, tuple)):
+            raise ValidationError("Availability windows must be a sequence")
         for window in self.windows:
             if not isinstance(window, AvailabilityWindow):
                 raise ValidationError("Availability windows must be AvailabilityWindow")
+
+    @property
+    def total_free_minutes(self) -> int:
+        """Total free time across all windows."""
+        return sum(w.duration_minutes for w in self.windows)
+
+    def find_slot(self, minutes: int) -> Optional[AvailabilityWindow]:
+        """Return the first window that fits the given duration, or None."""
+        for w in self.windows:
+            if w.fits(minutes):
+                return w
+        return None
+
+    @property
+    def is_empty(self) -> bool:
+        """True if there are no free windows."""
+        return len(self.windows) == 0
+
+
+@dataclass(frozen=True)
+class AvailabilityQuery:
+    date: str
+    work_start: str = "09:00"
+    work_end: str = "18:00"
+    timezone: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if not self.date.strip():
+            raise ValidationError("AvailabilityQuery date cannot be empty")
+        if not self.work_start.strip():
+            raise ValidationError("AvailabilityQuery work_start cannot be empty")
+        if not self.work_end.strip():
+            raise ValidationError("AvailabilityQuery work_end cannot be empty")
+
+
+@dataclass(frozen=True)
+class AvailabilityReport:
+    date: str
+    total_free_minutes: int
+    total_free_hours: float
+    windows: Sequence[AvailabilityWindow] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.date.strip():
+            raise ValidationError("AvailabilityReport date cannot be empty")
+        if self.total_free_minutes < 0:
+            raise ValidationError("AvailabilityReport total_free_minutes cannot be negative")
+        if self.total_free_hours < 0:
+            raise ValidationError("AvailabilityReport total_free_hours cannot be negative")
+        for window in self.windows:
+            if not isinstance(window, AvailabilityWindow):
+                raise ValidationError("AvailabilityReport windows must be AvailabilityWindow")
+
+
+@dataclass(frozen=True)
+class WeekOverviewQuery:
+    reference_date: Optional[str] = None
+    work_start: str = "09:00"
+    work_end: str = "18:00"
+    timezone: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.reference_date is not None and not self.reference_date.strip():
+            raise ValidationError("WeekOverviewQuery reference_date cannot be blank")
+        if not self.work_start.strip():
+            raise ValidationError("WeekOverviewQuery work_start cannot be empty")
+        if not self.work_end.strip():
+            raise ValidationError("WeekOverviewQuery work_end cannot be empty")
+
+
+@dataclass(frozen=True)
+class DayOverview:
+    date: str
+    day: str
+    free_hours: float
+
+    def __post_init__(self) -> None:
+        if not self.date.strip():
+            raise ValidationError("DayOverview date cannot be empty")
+        if not self.day.strip():
+            raise ValidationError("DayOverview day cannot be empty")
+        if self.free_hours < 0:
+            raise ValidationError("DayOverview free_hours cannot be negative")
+
+
+@dataclass(frozen=True)
+class WeekOverview:
+    week_start: str
+    total_free_hours: float
+    days: Sequence[DayOverview] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.week_start.strip():
+            raise ValidationError("WeekOverview week_start cannot be empty")
+        if self.total_free_hours < 0:
+            raise ValidationError("WeekOverview total_free_hours cannot be negative")
+        for day in self.days:
+            if not isinstance(day, DayOverview):
+                raise ValidationError("WeekOverview days must be DayOverview")
 
 
 @dataclass(frozen=True)
@@ -108,6 +217,7 @@ class Task:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source: Optional[str] = None
+    url: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -165,6 +275,7 @@ class Review:
     struggles: Optional[str] = None
     next_week_focus: Optional[str] = None
     tasks_completed: Optional[int] = None
+    url: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.transcript.strip():

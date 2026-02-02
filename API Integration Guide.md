@@ -19,15 +19,20 @@ This guide defines how Mirage integrates with external APIs safely and consisten
 - Notion is the only persistent store
 - Every write must confirm the property exists
 - Missing properties are errors
+- Canonical schema lives in `schema/tasks.yaml` (single source of truth)
+- Run `python schema/validate.py` to check for drift
 
 Required Task properties:
-- Name
-- Type
-- Status
-- Estimated minutes
-- Mentioned
-- Suggested priority
-- Suggested reason
+- Name (title)
+- Status (status)
+
+Optional Task properties:
+- Mentioned (number — procrastination counter)
+- Blocked (rich_text — who/what is blocking)
+- Energy (select — Red, Yellow, Green)
+- Type (select — Identity, Compound, Do It Now, Never Miss 2x, Important Not Urgent, Unblocks)
+- Complete Time (number — estimated minutes)
+- Priority (number — 1 = highest)
 
 ---
 

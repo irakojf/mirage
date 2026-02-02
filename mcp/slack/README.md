@@ -1,6 +1,6 @@
 # Mirage Slack Bot
 
-Capture tasks directly from Slack by @mentioning Mirage or sending DMs.
+Capture tasks directly from Slack — completely private (only you see responses).
 
 ## Architecture
 
@@ -11,6 +11,20 @@ Slack → fly.io (this server) → Claude Opus → Notion (all data)
 ```
 
 All data (tasks, reviews, identity) lives in Notion, accessible from both Slack and local Claude Code.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/mirage <task>` | Capture a single task |
+| `/prioritize` | Rank open tasks using core priority rules |
+| `/plan` | Draft a day plan from priorities + time estimates |
+| `/review` | Weekly review snapshot (completed, energy, procrastination) |
+| Message shortcut | Right-click any message → "Capture with Mirage" |
+| `@mirage` (in thread) | Capture a thread conversation as a task |
+| DM | Send any message in a DM to capture it as a task |
+
+All slash command responses are ephemeral (only you see them).
 
 ## Setup
 
@@ -28,18 +42,36 @@ All data (tasks, reviews, identity) lives in Notion, accessible from both Slack 
 3. Name: `Mirage`, select your workspace
 
 **Bot Token Scopes** (OAuth & Permissions):
-- `chat:write` - Send messages
-- `commands` - Handle slash commands
+- `chat:write` — Send messages and ephemeral responses
+- `commands` — Handle slash commands
+- `reactions:write` — Add reaction indicators (👀 while processing)
+- `channels:history` — Read thread messages in public channels
+- `groups:history` — Read thread messages in private channels
+- `im:history` — Read DM messages
+- `im:read` — Access DM channel info
+- `im:write` — Open DMs with users
+- `app_mentions:read` — Respond to @mirage mentions
 
-**Slash Commands**:
-1. Go to "Slash Commands" in sidebar
-2. Create the following commands (all use URL: `https://mirage-slack.fly.dev/slack/commands`):
+**Slash Commands** (all use URL `https://mirage-slack.fly.dev/slack/commands`):
 
 | Command | Description | Usage Hint |
 |---------|-------------|------------|
 | `/mirage` | Capture a task privately | `[task description]` |
-| `/dump` | Start a brain dump session | _(none)_ |
-| `/done` | End brain dump and process tasks | _(none)_ |
+| `/prioritize` | Rank tasks by priority | _(none)_ |
+| `/plan` | Draft a day plan | _(none)_ |
+| `/review` | Weekly review snapshot | _(none)_ |
+
+**Interactivity & Shortcuts**:
+1. Enable Interactivity, set Request URL to `https://mirage-slack.fly.dev/slack/interactive`
+2. Create a **Message Shortcut**:
+   - Name: `Capture with Mirage`
+   - Callback ID: `capture_with_mirage`
+
+**Event Subscriptions**:
+1. Enable Events, set Request URL to `https://mirage-slack.fly.dev/slack/events`
+2. Subscribe to bot events:
+   - `app_mention` — @mirage mentions in threads
+   - `message.im` — DM messages
 
 **Install to Workspace** and save:
 - `SLACK_BOT_TOKEN` (starts with `xoxb-`)
@@ -66,13 +98,6 @@ fly deploy
 fly logs
 ```
 
-### 4. Update Slack Event URL
-
-After deploy, go back to your Slack app:
-1. Event Subscriptions → Request URL
-2. Enter: `https://mirage-slack.fly.dev/slack/events`
-3. Slack will verify the endpoint
-
 ## Local Development
 
 ```bash
@@ -91,54 +116,58 @@ python server.py
 # In another terminal, expose with ngrok
 ngrok http 3000
 
-# Update Slack Event URL to ngrok URL
+# Update Slack URLs to ngrok URL
 ```
 
 ## Usage
 
-All commands are completely private (nobody else sees them).
-
 ### Quick Capture
-Use `/mirage` anywhere to capture a single task:
+
 ```
 /mirage call mom tomorrow
 /mirage finish quarterly report by Friday
 /mirage blocked on design review from Sarah
 ```
 
-### Brain Dump Mode
-Start a brain dump session to capture multiple thoughts conversationally:
+### Prioritize
 
-1. Type `/dump` anywhere to start
-2. Mirage opens a DM and you just type freely — no commands needed
-3. Each message gets a checkmark to confirm capture
-4. Type `done` (or `/done`) when finished
-5. Mirage processes everything and shows your tasks
-
-**Example session:**
 ```
-You: /dump
-Mirage: Brain dump started. Just type whatever's on your mind...
-
-You: call mom
-You: need to finish the quarterly report
-You: blocked on sarah for the design review
-You: maybe we should add dark mode to the app
-You: done
-
-Mirage: Brain dump complete!
-4 new tasks:
-• Call mom — Tasks (5 min)
-• Finish the quarterly report — Tasks (30 min)
-• Wait for Sarah's design review — Blocked
-• Add dark mode to the app — Ideas
+/prioritize
 ```
 
-### From a thread context
+Returns a ranked list of your top tasks with tags and reasoning.
+
+### Day Plan
+
 ```
-/mirage follow up on design feedback from this thread
-/mirage Sarah needs budget approval - waiting on her
+/plan
 ```
+
+Builds a schedule from your prioritized tasks that fit within configured work hours, using time estimates.
+
+### Weekly Review
+
+```
+/review
+```
+
+Shows completed count, procrastination patterns, energy breakdown, and stale decisions.
+
+### Message Shortcut
+
+Right-click any message → "Capture with Mirage". Works on single messages and threads:
+- Single message: captures as a task
+- Thread: reads the full conversation and extracts the core action item
+
+Adds a 👀 reaction while processing, then DMs you the captured task with a permalink back to the original message.
+
+### @mirage in Threads
+
+Tag `@mirage` in any thread to capture the conversation as a task. Must be used inside a thread (not top-level).
+
+### DM Capture
+
+Send any message directly to Mirage in a DM and it gets captured as a task. No slash command needed.
 
 ## Response Format
 
@@ -147,7 +176,7 @@ Mirage: Brain dump complete!
 Got it!
 
 "Call mom tomorrow"
-action | 5 min
+Tasks | 5 min
 [DO IT]
 ```
 
@@ -159,17 +188,37 @@ Already tracking this!
 Flagged for procrastination review
 ```
 
+**Prioritize:**
+```
+Top priorities:
+1) Send invoice to client [KEYSTONE] — Unblocks payment
+2) Review PR #42 [DO IT] — 2 min, do immediately
+3) Plan Q2 roadmap [COMPOUNDS] — Strategic, builds over time
+```
+
 ## Troubleshooting
 
 **Slash command not working:**
-- Verify the Request URL is correct: `https://mirage-slack.fly.dev/slack/commands`
+- Verify the Request URL: `https://mirage-slack.fly.dev/slack/commands`
 - Check `fly logs` for errors
-- Ensure the app is reinstalled after adding the slash command
-- Make sure you added all three commands: `/mirage`, `/dump`, `/done`
+- Ensure the app is reinstalled after adding commands
+- All four commands must be registered: `/mirage`, `/prioritize`, `/plan`, `/review`
 
 **"dispatch_failed" error:**
-- Server not running - check `fly status`
-- Wrong URL configured - verify `/slack/commands` endpoint
+- Server not running — check `fly status`
+- Wrong URL configured — verify the `/slack/commands` endpoint
+
+**Message shortcut not appearing:**
+- Verify Interactivity is enabled with correct Request URL
+- Check that the shortcut callback ID is exactly `capture_with_mirage`
+
+**@mirage not responding:**
+- Ensure `app_mention` event subscription is active
+- Must be used inside a thread, not as a top-level message
+
+**DMs not captured:**
+- Ensure `message.im` event subscription is active
+- Check that `im:history` scope is granted
 
 **Notion errors:**
 - Verify `NOTION_TOKEN` is set correctly
