@@ -30,27 +30,27 @@ TASKS_DATABASE_ID = "2ea35d23-b569-80cc-99be-e6d6a17b1548"
 
 # Status mapping: Turso bucket -> Notion status
 # Turso uses: bucket (action/project/idea/blocked) + status (open/done/archived)
-# Notion uses: Status select (Action/Project/Idea/Blocked/Done/Archived)
+# Notion uses: Status type (Tasks/Projects/Ideas/Blocked/Done/Won't Do)
 STATUS_MAP = {
-    ("action", "open"): "Action",
-    ("project", "open"): "Project",
-    ("idea", "open"): "Idea",
+    ("action", "open"): "Tasks",
+    ("project", "open"): "Projects",
+    ("idea", "open"): "Ideas",
     ("blocked", "open"): "Blocked",
     ("action", "done"): "Done",
     ("project", "done"): "Done",
     ("idea", "done"): "Done",
     ("blocked", "done"): "Done",
-    ("action", "archived"): "Archived",
-    ("project", "archived"): "Archived",
-    ("idea", "archived"): "Archived",
-    ("blocked", "archived"): "Archived",
+    ("action", "archived"): "Won't Do",
+    ("project", "archived"): "Won't Do",
+    ("idea", "archived"): "Won't Do",
+    ("blocked", "archived"): "Won't Do",
 }
 
-# Energy mapping
+# Energy mapping (canonical casing from schema)
 ENERGY_MAP = {
-    "red": "red",
-    "yellow": "yellow",
-    "green": "green",
+    "red": "Red",
+    "yellow": "Yellow",
+    "green": "Green",
 }
 
 
@@ -113,7 +113,7 @@ def create_notion_task(notion, task):
     # Map status
     notion_status = STATUS_MAP.get(
         (task["bucket"], task["status"]),
-        "Action"  # Default fallback
+        "Tasks"  # Default fallback
     )
 
     # Build properties
@@ -122,20 +122,20 @@ def create_notion_task(notion, task):
             "title": [{"text": {"content": task["content"]}}]
         },
         "Status": {
-            "select": {"name": notion_status}
+            "status": {"name": notion_status}
         },
         "Mentioned": {
             "number": task["times_added"] or 1
         }
     }
 
-    # Optional: Time to Complete
-    if task["estimated_minutes"]:
-        properties["Time to Complete"] = {"number": task["estimated_minutes"]}
+    # Optional: Complete Time
+    if task["estimated_minutes"] is not None:
+        properties["Complete Time"] = {"number": task["estimated_minutes"]}
 
-    # Optional: Blocked By
+    # Optional: Blocked
     if task["blocked_on"]:
-        properties["Blocked By"] = {
+        properties["Blocked"] = {
             "rich_text": [{"text": {"content": task["blocked_on"]}}]
         }
 
@@ -191,7 +191,7 @@ def migrate_tasks(include_done=False, dry_run=False):
 
     for i, task in enumerate(tasks, 1):
         status_key = (task["bucket"], task["status"])
-        notion_status = STATUS_MAP.get(status_key, "Action")
+        notion_status = STATUS_MAP.get(status_key, "Tasks")
 
         print(f"\n[{i}/{len(tasks)}] {task['content'][:50]}...")
         print(f"         Turso: bucket={task['bucket']}, status={task['status']}")
