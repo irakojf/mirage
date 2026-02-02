@@ -12,7 +12,8 @@ gunicorn>=21.0.0
 anthropic>=0.39.0
 
 # Notion API (all data storage)
-notion-client>=2.0.0
+# Pin to 2.2.1 - version 2.7.0 moved databases.query() to data_sources.query()
+notion-client==2.2.1
 
 # Environment variables
 python-dotenv>=1.0.0

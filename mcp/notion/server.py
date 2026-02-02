@@ -116,6 +116,10 @@ async def list_tools() -> list[Tool]:
                     "tag": {
                         "type": "string",
                         "description": "Tag: Identity or Compound (optional)"
+                    },
+                    "complete_time": {
+                        "type": "integer",
+                        "description": "Estimated time to complete in minutes (optional)"
                     }
                 },
                 "required": ["content", "status"]
@@ -130,6 +134,10 @@ async def list_tools() -> list[Tool]:
                     "page_id": {
                         "type": "string",
                         "description": "Notion page ID of the task"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New task name/description (optional)"
                     },
                     "status": {
                         "type": "string",
@@ -150,6 +158,14 @@ async def list_tools() -> list[Tool]:
                     "tag": {
                         "type": "string",
                         "description": "Tag: Identity or Compound (optional)"
+                    },
+                    "complete_time": {
+                        "type": "integer",
+                        "description": "Estimated time to complete in minutes (optional)"
+                    },
+                    "priority": {
+                        "type": "integer",
+                        "description": "Priority ranking (1 = highest priority) (optional)"
                     }
                 },
                 "required": ["page_id"]
@@ -203,6 +219,24 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["week_of", "transcript"]
             }
+        ),
+        Tool(
+            name="update_page_content",
+            description="Update the content of a Notion page by replacing all blocks with new content",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "page_id": {
+                        "type": "string",
+                        "description": "Notion page ID"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown content to set as page content (supports headings, paragraphs, lists)"
+                    }
+                },
+                "required": ["page_id", "content"]
+            }
         )
     ]
 
@@ -227,6 +261,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return await increment_task_mention(notion, arguments)
         elif name == "create_review":
             return await create_review(notion, arguments)
+        elif name == "update_page_content":
+            return await update_page_content(notion, arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as e:
@@ -394,6 +430,8 @@ async def query_tasks(notion: Client, args: dict) -> list[TextContent]:
                 "blocked_by": extract_text(props, "Blocked"),
                 "energy": extract_select(props, "Energy"),
                 "tags": extract_select(props, "Type"),  # Type is single-select
+                "complete_time": extract_number(props, "Complete Time"),
+                "priority": extract_number(props, "Priority"),
                 "created_time": page.get("created_time", ""),
                 "url": page.get("url")
             }
@@ -416,6 +454,7 @@ async def create_task(notion: Client, args: dict) -> list[TextContent]:
     status = args["status"]
     blocked_by = args.get("blocked_by")
     tag = args.get("tag")  # Single tag: Identity, Compound
+    complete_time = args.get("complete_time")  # Estimated minutes
 
     # Map bucket names to Notion status names
     STATUS_MAP = {
@@ -423,6 +462,7 @@ async def create_task(notion: Client, args: dict) -> list[TextContent]:
         "Project": "Projects",
         "Idea": "Ideas",
         "Blocked": "Blocked",
+        "Waiting On": "Waiting On",
         "Done": "Done",
         # Also accept Notion names directly
         "Tasks": "Tasks",
@@ -452,6 +492,11 @@ async def create_task(notion: Client, args: dict) -> list[TextContent]:
     if tag:
         properties["Type"] = {
             "select": {"name": tag}
+        }
+
+    if complete_time is not None:
+        properties["Complete Time"] = {
+            "number": complete_time
         }
 
     try:
@@ -484,6 +529,7 @@ async def update_task(notion: Client, args: dict) -> list[TextContent]:
         "Project": "Projects",
         "Idea": "Ideas",
         "Blocked": "Blocked",
+        "Waiting On": "Waiting On",
         "Done": "Done",
         "Tasks": "Tasks",
         "Projects": "Projects",
@@ -492,6 +538,11 @@ async def update_task(notion: Client, args: dict) -> list[TextContent]:
 
     # Build properties to update
     properties = {}
+
+    if "content" in args:
+        properties["Name"] = {
+            "title": [{"text": {"content": args["content"]}}]
+        }
 
     if "status" in args:
         notion_status = STATUS_MAP.get(args["status"], args["status"])
@@ -512,6 +563,12 @@ async def update_task(notion: Client, args: dict) -> list[TextContent]:
 
     if "tag" in args:
         properties["Type"] = {"select": {"name": args["tag"]}}
+
+    if "complete_time" in args:
+        properties["Complete Time"] = {"number": args["complete_time"]}
+
+    if "priority" in args:
+        properties["Priority"] = {"number": args["priority"]}
 
     if not properties:
         return [TextContent(type="text", text="No properties to update")]
@@ -622,6 +679,113 @@ async def create_review(notion: Client, args: dict) -> list[TextContent]:
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error creating review: {str(e)}")]
+
+
+async def update_page_content(notion: Client, args: dict) -> list[TextContent]:
+    """Update a Notion page's content by replacing all blocks."""
+    page_id = args["page_id"]
+    content = args["content"]
+
+    try:
+        # First, delete all existing blocks
+        existing_blocks = notion.blocks.children.list(block_id=page_id)
+        for block in existing_blocks.get("results", []):
+            notion.blocks.delete(block_id=block["id"])
+
+        # Parse markdown content into Notion blocks
+        blocks = parse_markdown_to_blocks(content)
+
+        # Add new blocks
+        if blocks:
+            notion.blocks.children.append(block_id=page_id, children=blocks)
+
+        result = {
+            "success": True,
+            "page_id": page_id,
+            "blocks_added": len(blocks)
+        }
+
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error updating page content: {str(e)}")]
+
+
+def parse_markdown_to_blocks(content: str) -> list[dict]:
+    """Parse markdown content into Notion blocks."""
+    blocks = []
+    lines = content.split("\n")
+
+    for line in lines:
+        line = line.rstrip()
+
+        # Skip empty lines
+        if not line:
+            continue
+
+        # Headings
+        if line.startswith("### "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{"type": "text", "text": {"content": line[4:]}}]
+                }
+            })
+        elif line.startswith("## "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {
+                    "rich_text": [{"type": "text", "text": {"content": line[3:]}}]
+                }
+            })
+        elif line.startswith("# "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_1",
+                "heading_1": {
+                    "rich_text": [{"type": "text", "text": {"content": line[2:]}}]
+                }
+            })
+        # Bulleted list
+        elif line.startswith("- ") or line.startswith("* "):
+            blocks.append({
+                "object": "block",
+                "type": "bulleted_list_item",
+                "bulleted_list_item": {
+                    "rich_text": [{"type": "text", "text": {"content": line[2:]}}]
+                }
+            })
+        # Numbered list (simple pattern)
+        elif len(line) > 2 and line[0].isdigit() and line[1] == "." and line[2] == " ":
+            blocks.append({
+                "object": "block",
+                "type": "numbered_list_item",
+                "numbered_list_item": {
+                    "rich_text": [{"type": "text", "text": {"content": line[3:]}}]
+                }
+            })
+        # Quote blocks
+        elif line.startswith("> "):
+            blocks.append({
+                "object": "block",
+                "type": "quote",
+                "quote": {
+                    "rich_text": [{"type": "text", "text": {"content": line[2:]}}]
+                }
+            })
+        # Regular paragraph
+        else:
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{"type": "text", "text": {"content": line}}]
+                }
+            })
+
+    return blocks
 
 
 # Helper functions for extracting Notion properties

@@ -5,32 +5,21 @@ Capture tasks directly from Slack by @mentioning Mirage or sending DMs.
 ## Architecture
 
 ```
-Slack → fly.io (this server) → Claude Opus → Turso (SQLite cloud)
+Slack → fly.io (this server) → Claude Opus → Notion (all data)
                                                     ↑
                                      Local Claude Code ─┘
 ```
 
+All data (tasks, reviews, identity) lives in Notion, accessible from both Slack and local Claude Code.
+
 ## Setup
 
-### 1. Turso Database
+### 1. Notion Integration
 
-```bash
-# Install CLI
-brew install tursodatabase/tap/turso
-
-# Login
-turso auth login
-
-# Create database
-turso db create mirage
-
-# Get credentials
-turso db show mirage --url        # → TURSO_DATABASE_URL
-turso db tokens create mirage     # → TURSO_AUTH_TOKEN
-
-# Initialize schema
-turso db shell mirage < ../../data/schema.sql
-```
+1. Go to https://www.notion.so/my-integrations
+2. Create a new integration for your workspace
+3. Copy the "Internal Integration Secret" → `NOTION_TOKEN`
+4. Share your tasks database with the integration
 
 ### 2. Slack App
 
@@ -44,11 +33,13 @@ turso db shell mirage < ../../data/schema.sql
 
 **Slash Commands**:
 1. Go to "Slash Commands" in sidebar
-2. Click "Create New Command"
-3. Command: `/mirage`
-4. Request URL: `https://mirage-slack.fly.dev/slack/commands` (set after deploy)
-5. Short Description: `Capture a task privately`
-6. Usage Hint: `[task description]`
+2. Create the following commands (all use URL: `https://mirage-slack.fly.dev/slack/commands`):
+
+| Command | Description | Usage Hint |
+|---------|-------------|------------|
+| `/mirage` | Capture a task privately | `[task description]` |
+| `/dump` | Start a brain dump session | _(none)_ |
+| `/done` | End brain dump and process tasks | _(none)_ |
 
 **Install to Workspace** and save:
 - `SLACK_BOT_TOKEN` (starts with `xoxb-`)
@@ -66,8 +57,7 @@ fly launch --no-deploy
 fly secrets set SLACK_BOT_TOKEN=xoxb-your-token
 fly secrets set SLACK_SIGNING_SECRET=your-signing-secret
 fly secrets set ANTHROPIC_API_KEY=sk-ant-your-key
-fly secrets set TURSO_DATABASE_URL=libsql://mirage-xxx.turso.io
-fly secrets set TURSO_AUTH_TOKEN=your-turso-token
+fly secrets set NOTION_TOKEN=secret_your-notion-token
 
 # Deploy
 fly deploy
@@ -93,8 +83,7 @@ pip install -r requirements.txt
 export SLACK_BOT_TOKEN=xoxb-...
 export SLACK_SIGNING_SECRET=...
 export ANTHROPIC_API_KEY=sk-ant-...
-export TURSO_DATABASE_URL=libsql://...
-export TURSO_AUTH_TOKEN=...
+export NOTION_TOKEN=secret_...
 
 # Run server
 python server.py
@@ -107,16 +96,45 @@ ngrok http 3000
 
 ## Usage
 
-Use `/mirage` anywhere in Slack - it's completely private (nobody else sees it).
+All commands are completely private (nobody else sees them).
 
-**Capture a task:**
+### Quick Capture
+Use `/mirage` anywhere to capture a single task:
 ```
 /mirage call mom tomorrow
 /mirage finish quarterly report by Friday
 /mirage blocked on design review from Sarah
 ```
 
-**From a thread context:**
+### Brain Dump Mode
+Start a brain dump session to capture multiple thoughts conversationally:
+
+1. Type `/dump` anywhere to start
+2. Mirage opens a DM and you just type freely — no commands needed
+3. Each message gets a checkmark to confirm capture
+4. Type `done` (or `/done`) when finished
+5. Mirage processes everything and shows your tasks
+
+**Example session:**
+```
+You: /dump
+Mirage: Brain dump started. Just type whatever's on your mind...
+
+You: call mom
+You: need to finish the quarterly report
+You: blocked on sarah for the design review
+You: maybe we should add dark mode to the app
+You: done
+
+Mirage: Brain dump complete!
+4 new tasks:
+• Call mom — Tasks (5 min)
+• Finish the quarterly report — Tasks (30 min)
+• Wait for Sarah's design review — Blocked
+• Add dark mode to the app — Ideas
+```
+
+### From a thread context
 ```
 /mirage follow up on design feedback from this thread
 /mirage Sarah needs budget approval - waiting on her
@@ -147,11 +165,12 @@ Flagged for procrastination review
 - Verify the Request URL is correct: `https://mirage-slack.fly.dev/slack/commands`
 - Check `fly logs` for errors
 - Ensure the app is reinstalled after adding the slash command
+- Make sure you added all three commands: `/mirage`, `/dump`, `/done`
 
 **"dispatch_failed" error:**
 - Server not running - check `fly status`
 - Wrong URL configured - verify `/slack/commands` endpoint
 
-**Database errors:**
-- Verify Turso credentials
-- Check schema is initialized: `turso db shell mirage "SELECT COUNT(*) FROM tasks"`
+**Notion errors:**
+- Verify `NOTION_TOKEN` is set correctly
+- Ensure the tasks database is shared with your integration

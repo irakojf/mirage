@@ -11,6 +11,7 @@ Flask + Slack Bolt server that:
 import os
 import re
 import logging
+from datetime import datetime
 
 from flask import Flask, request
 from slack_bolt import App
@@ -20,7 +21,16 @@ from notion_db import (
     create_task,
     increment_task_mentions
 )
-from task_processor import process_task, format_slack_response
+from task_processor import (
+    process_task,
+    process_brain_dump,
+    format_slack_response,
+    detect_intent,
+    process_conversation
+)
+
+# Active brain dump sessions: {user_id: {"messages": [], "started_at": datetime, "channel_id": str}}
+active_dumps = {}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -211,6 +221,159 @@ def handle_slash_command(ack, command, client, context):
     )
 
 
+@slack_app.command("/dump")
+def handle_dump_command(ack, command, client):
+    """
+    Start a brain dump session.
+
+    Opens a DM where the user can freely type thoughts.
+    End with /done to process everything into tasks.
+    """
+    ack()
+
+    user_id = command.get("user_id")
+
+    # Check if user already has an active dump
+    if user_id in active_dumps:
+        # Let them know they have an active session
+        try:
+            client.chat_postMessage(
+                channel=user_id,
+                text="You already have an active brain dump session.\n\nKeep typing your thoughts, or use `/done` when finished."
+            )
+        except Exception as e:
+            logger.error(f"Error sending dump reminder: {e}")
+        return
+
+    # Start a new dump session
+    active_dumps[user_id] = {
+        "messages": [],
+        "started_at": datetime.now(),
+        "channel_id": user_id  # DM channel
+    }
+
+    # Send welcome message via DM
+    try:
+        client.chat_postMessage(
+            channel=user_id,
+            text="*Brain dump started* 🧠\n\n"
+                 "Just type whatever's on your mind — no commands needed.\n"
+                 "Each message will be captured.\n\n"
+                 "When you're done, type `/done` or just say \"done\"."
+        )
+    except Exception as e:
+        logger.error(f"Error starting dump session: {e}")
+        del active_dumps[user_id]
+
+
+@slack_app.command("/done")
+def handle_done_command(ack, command, client):
+    """
+    End brain dump session and process all captured messages into tasks.
+    """
+    ack()
+
+    user_id = command.get("user_id")
+
+    # Check if user has an active dump
+    if user_id not in active_dumps:
+        try:
+            client.chat_postMessage(
+                channel=user_id,
+                text="No active brain dump session.\n\nUse `/dump` to start one."
+            )
+        except Exception as e:
+            logger.error(f"Error sending no-session message: {e}")
+        return
+
+    # Get the dump session
+    session = active_dumps.pop(user_id)
+    messages = session["messages"]
+
+    if not messages:
+        try:
+            client.chat_postMessage(
+                channel=user_id,
+                text="Brain dump ended — but you didn't capture anything!\n\nUse `/dump` to start a new session."
+            )
+        except Exception as e:
+            logger.error(f"Error sending empty dump message: {e}")
+        return
+
+    # Send processing message
+    try:
+        client.chat_postMessage(
+            channel=user_id,
+            text=f"Processing {len(messages)} item{'s' if len(messages) != 1 else ''}..."
+        )
+    except Exception as e:
+        logger.error(f"Error sending processing message: {e}")
+
+    # Process the brain dump
+    try:
+        raw_dump = "\n".join(messages)
+        processed_tasks = process_brain_dump(raw_dump, slack_user=user_id)
+
+        # Create tasks in Notion
+        created_tasks = []
+        duplicates = []
+
+        for task_data in processed_tasks:
+            if task_data.get("is_duplicate") and task_data.get("duplicate_of"):
+                updated = increment_task_mentions(task_data["duplicate_of"])
+                if updated:
+                    duplicates.append(updated)
+                else:
+                    # Task ID didn't exist, create new
+                    task = create_task(
+                        content=task_data["content"],
+                        status=task_data["bucket"],
+                        estimated_minutes=task_data.get("estimated_minutes"),
+                        notes=f"Captured from Slack brain dump",
+                        blocked_by=task_data.get("blocked_on"),
+                        tags=task_data.get("tags", [])
+                    )
+                    created_tasks.append(task)
+            else:
+                task = create_task(
+                    content=task_data["content"],
+                    status=task_data["bucket"],
+                    estimated_minutes=task_data.get("estimated_minutes"),
+                    notes=f"Captured from Slack brain dump",
+                    blocked_by=task_data.get("blocked_on"),
+                    tags=task_data.get("tags", [])
+                )
+                created_tasks.append(task)
+
+        # Format response
+        response_lines = ["*Brain dump complete!* ✅\n"]
+
+        if created_tasks:
+            response_lines.append(f"*{len(created_tasks)} new task{'s' if len(created_tasks) != 1 else ''}:*")
+            for task in created_tasks:
+                status = task.get('status', 'Tasks')
+                time_str = f" ({task['estimated_minutes']} min)" if task.get('estimated_minutes') else ""
+                response_lines.append(f"• {task['content']} — _{status}{time_str}_")
+
+        if duplicates:
+            response_lines.append(f"\n*{len(duplicates)} already tracked:*")
+            for task in duplicates:
+                mentions = task.get('times_added', 1)
+                response_lines.append(f"• {task['content']} (mentioned {mentions}x)")
+
+        client.chat_postMessage(
+            channel=user_id,
+            text="\n".join(response_lines)
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing brain dump: {e}")
+        client.chat_postMessage(
+            channel=user_id,
+            text=f"Failed to process brain dump: {str(e)}"
+        )
+
+
 @slack_app.shortcut("capture_with_mirage")
 def handle_message_shortcut(ack, shortcut, client):
     """
@@ -359,7 +522,7 @@ def handle_mention(event, context, client):
 
 @slack_app.event("message")
 def handle_message(event, context, client):
-    """Handle DM messages with @mirage mentions."""
+    """Handle DM messages — brain dump, conversational coaching, or task capture."""
     # Ignore bot messages and message_changed events
     if event.get("subtype") in ["bot_message", "message_changed", "message_deleted"]:
         return
@@ -369,29 +532,182 @@ def handle_message(event, context, client):
     if channel_type != "im":
         return
 
-    text = event.get("text", "")
+    text = event.get("text", "").strip()
+    user_id = event.get("user")
+    channel_id = event.get("channel")
+    message_ts = event.get("ts")
     bot_user_id = context.get("bot_user_id", "")
 
-    # Check if bot was mentioned in the DM
-    if f"<@{bot_user_id}>" not in text:
+    # Strip bot mention if present (not required anymore, but clean it up)
+    clean_text = re.sub(rf"<@{bot_user_id}>", "", text).strip()
+    if not clean_text:
         return
 
-    message_ts = event.get("ts")
-    thread_ts = event.get("thread_ts") or message_ts
-    channel_id = event.get("channel")
-    user_id = event.get("user")
+    # Check if user has an active brain dump session
+    if user_id in active_dumps:
+        # Check if they're ending the session
+        if clean_text.lower() in ["done", "done!", "finished", "that's it", "thats it", "end"]:
+            # Trigger the done flow
+            handle_done_from_message(user_id, client)
+            return
 
-    # React with eyes to acknowledge receipt
+        # Collect the message
+        active_dumps[user_id]["messages"].append(clean_text)
+
+        # React with checkmark to confirm capture
+        try:
+            client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=message_ts)
+        except Exception as e:
+            logger.warning(f"Couldn't add reaction: {e}")
+        return
+
+    # No active dump — detect intent and route accordingly
+    intent = detect_intent(clean_text)
+    logger.info(f"DM intent detected: {intent} for message: {clean_text[:50]}...")
+
+    # React with eyes to show we're processing
     try:
         client.reactions_add(channel=channel_id, name="eyes", timestamp=message_ts)
     except Exception as e:
         logger.warning(f"Couldn't add reaction: {e}")
 
-    # Fetch thread messages (or just this message if not in a thread)
-    thread_messages = fetch_thread_messages(client, channel_id, thread_ts)
+    if intent in ["question", "greeting"]:
+        # Conversational mode — help with prioritization, answer questions
+        try:
+            response = process_conversation(clean_text, slack_user=user_id)
+            client.chat_postMessage(channel=user_id, text=response)
+        except Exception as e:
+            logger.error(f"Error in conversation: {e}")
+            client.chat_postMessage(channel=user_id, text=f"Sorry, hit an error: {str(e)}")
+    else:
+        # Task capture mode — same as /mirage
+        try:
+            processed = process_task(clean_text, slack_user=user_id, is_thread=False)
 
-    # Process the thread (response sent as ephemeral - only you can see it)
-    handle_thread_task(client, thread_messages, user_id, channel_id, thread_ts, bot_user_id)
+            if processed.get("is_duplicate") and processed.get("duplicate_of"):
+                updated_task = increment_task_mentions(processed["duplicate_of"])
+                if updated_task:
+                    response = format_slack_response(updated_task, is_new=False)
+                else:
+                    task = create_task(
+                        content=processed["content"],
+                        status=processed["bucket"],
+                        estimated_minutes=processed.get("estimated_minutes"),
+                        notes=f"Captured from Slack DM",
+                        blocked_by=processed.get("blocked_on"),
+                        tags=processed.get("tags", [])
+                    )
+                    response = format_slack_response(task, is_new=True)
+            else:
+                task = create_task(
+                    content=processed["content"],
+                    status=processed["bucket"],
+                    estimated_minutes=processed.get("estimated_minutes"),
+                    notes=f"Captured from Slack DM",
+                    blocked_by=processed.get("blocked_on"),
+                    tags=processed.get("tags", [])
+                )
+                response = format_slack_response(task, is_new=True)
+
+            client.chat_postMessage(channel=user_id, text=response)
+        except Exception as e:
+            logger.error(f"Error capturing task from DM: {e}")
+            client.chat_postMessage(channel=user_id, text=f"Failed to capture task: {str(e)}")
+
+
+def handle_done_from_message(user_id: str, client):
+    """
+    End brain dump session triggered by a "done" message (not slash command).
+    Reuses the same logic as /done.
+    """
+    # Get the dump session
+    session = active_dumps.pop(user_id, None)
+    if not session:
+        return
+
+    messages = session["messages"]
+
+    if not messages:
+        try:
+            client.chat_postMessage(
+                channel=user_id,
+                text="Brain dump ended — but you didn't capture anything!\n\nUse `/dump` to start a new session."
+            )
+        except Exception as e:
+            logger.error(f"Error sending empty dump message: {e}")
+        return
+
+    # Send processing message
+    try:
+        client.chat_postMessage(
+            channel=user_id,
+            text=f"Processing {len(messages)} item{'s' if len(messages) != 1 else ''}..."
+        )
+    except Exception as e:
+        logger.error(f"Error sending processing message: {e}")
+
+    # Process the brain dump
+    try:
+        raw_dump = "\n".join(messages)
+        processed_tasks = process_brain_dump(raw_dump, slack_user=user_id)
+
+        # Create tasks in Notion
+        created_tasks = []
+        duplicates = []
+
+        for task_data in processed_tasks:
+            if task_data.get("is_duplicate") and task_data.get("duplicate_of"):
+                updated = increment_task_mentions(task_data["duplicate_of"])
+                if updated:
+                    duplicates.append(updated)
+                else:
+                    task = create_task(
+                        content=task_data["content"],
+                        status=task_data["bucket"],
+                        estimated_minutes=task_data.get("estimated_minutes"),
+                        notes=f"Captured from Slack brain dump",
+                        blocked_by=task_data.get("blocked_on"),
+                        tags=task_data.get("tags", [])
+                    )
+                    created_tasks.append(task)
+            else:
+                task = create_task(
+                    content=task_data["content"],
+                    status=task_data["bucket"],
+                    estimated_minutes=task_data.get("estimated_minutes"),
+                    notes=f"Captured from Slack brain dump",
+                    blocked_by=task_data.get("blocked_on"),
+                    tags=task_data.get("tags", [])
+                )
+                created_tasks.append(task)
+
+        # Format response
+        response_lines = ["*Brain dump complete!* ✅\n"]
+
+        if created_tasks:
+            response_lines.append(f"*{len(created_tasks)} new task{'s' if len(created_tasks) != 1 else ''}:*")
+            for task in created_tasks:
+                status = task.get('status', 'Tasks')
+                time_str = f" ({task['estimated_minutes']} min)" if task.get('estimated_minutes') else ""
+                response_lines.append(f"• {task['content']} — _{status}{time_str}_")
+
+        if duplicates:
+            response_lines.append(f"\n*{len(duplicates)} already tracked:*")
+            for task in duplicates:
+                mentions = task.get('times_added', 1)
+                response_lines.append(f"• {task['content']} (mentioned {mentions}x)")
+
+        client.chat_postMessage(
+            channel=user_id,
+            text="\n".join(response_lines)
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing brain dump: {e}")
+        client.chat_postMessage(
+            channel=user_id,
+            text=f"Failed to process brain dump: {str(e)}"
+        )
 
 
 # Flask routes
