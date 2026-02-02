@@ -15,3 +15,7 @@ class DependencyError(MirageCoreError):
 
 class ConfigError(MirageCoreError):
     """Raised when configuration is invalid or missing."""
+
+
+class SlottingError(MirageCoreError):
+    """Raised when calendar slotting fails or is invalid."""

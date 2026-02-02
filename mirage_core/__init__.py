@@ -10,11 +10,31 @@ from .aliases import (
     resolve_status,
     resolve_type,
 )
+from .calendar import (
+    apply_buffer,
+    detect_conflicts,
+    filter_calendar_fit,
+    find_slot,
+    protect_morning,
+    require_slot,
+    safe_get_availability,
+    safe_get_week_overview,
+    task_fits_calendar,
+)
 from .config import MirageConfig
-from .errors import ConfigError, DependencyError, MirageCoreError, ValidationError
+from .errors import (
+    ConfigError,
+    DependencyError,
+    MirageCoreError,
+    SlottingError,
+    ValidationError,
+)
 from .models import (
     Availability,
+    AvailabilityQuery,
+    AvailabilityReport,
     AvailabilityWindow,
+    DayOverview,
     EnergyLevel,
     IdentityId,
     IdentityProfile,
@@ -29,6 +49,8 @@ from .models import (
     TaskMutation,
     TaskStatus,
     TaskType,
+    WeekOverview,
+    WeekOverviewQuery,
 )
 from .ports import (
     CalendarPort,
@@ -47,6 +69,7 @@ from .principles import (
     load_principles,
     parse_principles,
 )
+from .prioritization import PrioritizationResult, PrioritySuggestion, prioritize
 from .services import (
     PROCRASTINATION_THRESHOLD,
     MirageOrchestrator,
@@ -56,11 +79,22 @@ from .services import (
     normalize_task_name,
     sort_by_priority,
 )
-
 __all__ = [
     "Availability",
+    "AvailabilityQuery",
+    "AvailabilityReport",
     "AvailabilityWindow",
+    "DayOverview",
     "CalendarPort",
+    "apply_buffer",
+    "detect_conflicts",
+    "filter_calendar_fit",
+    "find_slot",
+    "protect_morning",
+    "require_slot",
+    "safe_get_availability",
+    "safe_get_week_overview",
+    "task_fits_calendar",
     "CaptureRequest",
     "CaptureResult",
     "ConfigError",
@@ -77,12 +111,14 @@ __all__ = [
     "MirageOrchestrator",
     "PrinciplesIndex",
     "PROCRASTINATION_THRESHOLD",
+    "PrioritizationResult",
     "PrincipleSection",
     "Project",
     "ProjectId",
     "Review",
     "ReviewId",
     "ReviewRepository",
+    "SlottingError",
     "STATUS_ALIASES",
     "TYPE_ALIASES",
     "Task",
@@ -93,8 +129,11 @@ __all__ = [
     "TaskRepository",
     "TaskStatus",
     "TaskType",
+    "PrioritySuggestion",
     "ThinkingMode",
     "ValidationError",
+    "WeekOverview",
+    "WeekOverviewQuery",
     "clear_cache",
     "get_principles",
     "load_principles",
@@ -102,6 +141,7 @@ __all__ = [
     "filter_actionable",
     "flag_procrastinating",
     "normalize_task_name",
+    "prioritize",
     "resolve_status",
     "resolve_type",
     "sort_by_priority",
