@@ -86,7 +86,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "status_filter": {
                         "type": "string",
-                        "description": "Filter by status: Action, Project, Idea, Blocked, Done, Archived (optional)"
+                        "description": "Filter by status: Tasks, Projects, Ideas, Blocked, Not Now, Waiting On, Done, Won't Do (optional)"
                     },
                     "exclude_done": {
                         "type": "boolean",
@@ -107,7 +107,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "status": {
                         "type": "string",
-                        "description": "Status: Action/Tasks, Project/Projects, Idea/Ideas, Blocked"
+                        "description": "Status: Action/Tasks, Project/Projects, Idea/Ideas, Blocked, Not Now, Waiting On, Won't Do, Done"
                     },
                     "blocked_by": {
                         "type": "string",
@@ -115,7 +115,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "tag": {
                         "type": "string",
-                        "description": "Tag: Identity or Compound (optional)"
+                        "description": "Tag: Identity, Compound, Do It Now, Never Miss 2x, Important Not Urgent, Unblocks (optional)"
                     },
                     "complete_time": {
                         "type": "integer",
@@ -141,7 +141,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "status": {
                         "type": "string",
-                        "description": "New status: Tasks, Projects, Ideas, Blocked, Done (optional)"
+                        "description": "New status: Tasks, Projects, Ideas, Blocked, Not Now, Waiting On, Won't Do, Done (optional)"
                     },
                     "mentioned": {
                         "type": "integer",
@@ -157,7 +157,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "tag": {
                         "type": "string",
-                        "description": "Tag: Identity or Compound (optional)"
+                        "description": "Tag: Identity, Compound, Do It Now, Never Miss 2x, Important Not Urgent, Unblocks (optional)"
                     },
                     "complete_time": {
                         "type": "integer",
@@ -408,8 +408,10 @@ async def query_tasks(notion: Client, args: dict) -> list[TextContent]:
         }
     elif exclude_done:
         filter_obj = {
-            "property": "Status",
-            "status": {"does_not_equal": "Done"}
+            "and": [
+                {"property": "Status", "status": {"does_not_equal": "Done"}},
+                {"property": "Status", "status": {"does_not_equal": "Won't Do"}}
+            ]
         }
 
     try:
@@ -463,6 +465,8 @@ async def create_task(notion: Client, args: dict) -> list[TextContent]:
         "Idea": "Ideas",
         "Blocked": "Blocked",
         "Waiting On": "Waiting On",
+        "Not Now": "Not Now",
+        "Won't Do": "Won't Do",
         "Done": "Done",
         # Also accept Notion names directly
         "Tasks": "Tasks",
@@ -530,6 +534,8 @@ async def update_task(notion: Client, args: dict) -> list[TextContent]:
         "Idea": "Ideas",
         "Blocked": "Blocked",
         "Waiting On": "Waiting On",
+        "Not Now": "Not Now",
+        "Won't Do": "Won't Do",
         "Done": "Done",
         "Tasks": "Tasks",
         "Projects": "Projects",
