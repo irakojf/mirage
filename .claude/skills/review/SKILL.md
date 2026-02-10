@@ -21,8 +21,7 @@ Call: mcp__notion__query_tasks
 Arguments: { "exclude_done": true }
 
 # Calendar events for this week (Sunday to Saturday)
-Call: mcp__google-calendar__list_events
-Arguments: { "start_date": "<sunday of this week>", "end_date": "<saturday of this week>" }
+Bash: python3.11 mcp/google-calendar/server.py list_events --start-date <sunday of this week> --end-date <saturday of this week>
 ```
 
 Filter completed tasks by `created_time` for "this week" logic.

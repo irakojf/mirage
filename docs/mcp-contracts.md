@@ -222,102 +222,22 @@ Replace all blocks on a Notion page with new markdown content. Supports headings
 
 ---
 
-## Google Calendar MCP Server (`mcp/google-calendar/server.py`)
+## Google Calendar CLI (`mcp/google-calendar/server.py`)
 
-Transport: stdio
+**Not an MCP server.** Plain CLI script invoked via Bash. Outputs JSON to stdout, errors to stderr.
+
 Auth: Google OAuth2 (credentials at `~/.config/mirage/credentials.json`, token cached at `~/.config/mirage/token.json`)
-
-### `get_free_time`
-
-Get available free blocks for a specific day.
-
-**Input:**
-```json
-{
-  "date": "2026-02-02",    // string (YYYY-MM-DD), optional (default: today)
-  "work_start": "09:00",   // string (HH:MM), optional (default: from config)
-  "work_end": "18:00"      // string (HH:MM), optional (default: from config)
-}
-```
-
-**Output:**
-```json
-{
-  "date": "2026-02-02",
-  "total_free_minutes": 360,
-  "total_free_hours": 6.0,
-  "free_blocks": [
-    {
-      "start": "09:00",
-      "end": "10:30",
-      "duration_minutes": 90
-    },
-    {
-      "start": "14:00",
-      "end": "18:00",
-      "duration_minutes": 240
-    }
-  ]
-}
-```
-
-### `get_week_overview`
-
-Get busy/free summary for the next 7 days.
-
-**Input:**
-```json
-{
-  "work_start": "09:00",  // string (HH:MM), optional
-  "work_end": "18:00"     // string (HH:MM), optional
-}
-```
-
-**Output:**
-```json
-{
-  "week_start": "2026-02-02",
-  "total_free_hours": 32.5,
-  "days": [
-    {
-      "date": "2026-02-02",
-      "day": "Monday",
-      "free_hours": 6.0
-    }
-  ]
-}
-```
-
-### `create_event`
-
-Create a new calendar event.
-
-**Input:**
-```json
-{
-  "title": "Focus: quarterly report",                // string, required
-  "start": "2026-02-02T14:00:00",                   // string (ISO datetime), required
-  "end": "2026-02-02T15:30:00",                     // string (ISO datetime), required
-  "description": "Deep work block for Q1 report"    // string, optional
-}
-```
-
-**Output:** Plain text with event link:
-```
-Event created: https://www.google.com/calendar/event?eid=...
-```
 
 ### `list_events`
 
-List calendar events for a date range.
-
-**Input:**
-```json
-{
-  "start_date": "2026-02-02",  // string (YYYY-MM-DD), optional (default: today)
-  "end_date": "2026-02-09"    // string (YYYY-MM-DD), optional (default: start + 7 days)
-}
+```bash
+python3.11 mcp/google-calendar/server.py list_events --start-date 2026-02-02 --end-date 2026-02-09
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--start-date` | today | Start date YYYY-MM-DD |
+| `--end-date` | start + 7 days | End date YYYY-MM-DD |
 
 **Output:**
 ```json
@@ -330,11 +250,81 @@ List calendar events for a date range.
 ]
 ```
 
+### `get_free_time`
+
+```bash
+python3.11 mcp/google-calendar/server.py get_free_time --date 2026-02-02
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--date` | today | Date YYYY-MM-DD |
+| `--work-start` | 09:00 | Work start HH:MM |
+| `--work-end` | 18:00 | Work end HH:MM |
+
+**Output:**
+```json
+{
+  "date": "2026-02-02",
+  "total_free_minutes": 360,
+  "total_free_hours": 6.0,
+  "free_blocks": [
+    { "start": "09:00", "end": "10:30", "duration_minutes": 90 },
+    { "start": "14:00", "end": "18:00", "duration_minutes": 240 }
+  ]
+}
+```
+
+### `get_week_overview`
+
+```bash
+python3.11 mcp/google-calendar/server.py get_week_overview
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--work-start` | 09:00 | Work start HH:MM |
+| `--work-end` | 18:00 | Work end HH:MM |
+
+**Output:**
+```json
+{
+  "week_start": "2026-02-02",
+  "total_free_hours": 32.5,
+  "days": [
+    { "date": "2026-02-02", "day": "Monday", "free_hours": 6.0 }
+  ]
+}
+```
+
+### `create_event`
+
+```bash
+python3.11 mcp/google-calendar/server.py create_event --title "Focus: quarterly report" --start "2026-02-02T14:00:00" --end "2026-02-02T15:30:00" --description "Deep work block"
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--title` | yes | Event title |
+| `--start` | yes | Start ISO datetime |
+| `--end` | yes | End ISO datetime |
+| `--description` | no | Event description |
+
+**Output:**
+```json
+{
+  "success": true,
+  "event_link": "https://www.google.com/calendar/event?eid=...",
+  "event_id": "abc123",
+  "summary": "Focus: quarterly report"
+}
+```
+
 ---
 
 ## Error Format
 
-Both servers return errors as JSON on failure:
+The Notion server returns errors as JSON on failure:
 
 ```json
 {
@@ -345,7 +335,7 @@ Both servers return errors as JSON on failure:
 }
 ```
 
-The Google Calendar server falls back to plain text errors: `"Error: <message>"`.
+The Google Calendar CLI writes errors as JSON to stderr and exits with code 1.
 
 ---
 

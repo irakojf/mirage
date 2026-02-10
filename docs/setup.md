@@ -39,24 +39,19 @@ NOTION_TOKEN=secret_... python schema/validate.py
 
 ## 2. MCP Servers
 
-Both MCP servers are Python and run over stdio. Configure in your MCP settings (`.claude/settings.json` or project config).
+The Notion MCP server runs over stdio. Google Calendar uses a plain CLI script. Configure MCP in `.claude/settings.json` or project config.
 
-See [MCP Contracts](mcp-contracts.md) for full tool inputs/outputs.
+See [MCP Contracts](mcp-contracts.md) for Notion tool inputs/outputs and [CLI Commands](cli-commands.md) for calendar CLI usage.
 
-### Google Calendar
+### Google Calendar (CLI — not MCP)
 
-```json
-{
-  "mcpServers": {
-    "google-calendar": {
-      "command": "python",
-      "args": ["mcp/google-calendar/server.py"],
-      "env": {
-        "NOTION_TOKEN": "secret_..."
-      }
-    }
-  }
-}
+Google Calendar is accessed via a CLI script, not an MCP server:
+
+```bash
+python3.11 mcp/google-calendar/server.py list_events --start-date 2026-02-10
+python3.11 mcp/google-calendar/server.py get_free_time --date 2026-02-10
+python3.11 mcp/google-calendar/server.py get_week_overview
+python3.11 mcp/google-calendar/server.py create_event --title "Meeting" --start "2026-02-10T14:00:00" --end "2026-02-10T15:00:00"
 ```
 
 Requires Google OAuth credentials at `~/.config/mirage/credentials.json` (download from Google Cloud Console).

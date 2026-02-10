@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """
-Google Calendar MCP Server for Mirage
+Google Calendar CLI for Mirage
 
-Provides tools to:
-- Get free time blocks for a given day
-- Get week overview of busy/free time
-- Create calendar events
-- List existing events
+Provides subcommands:
+- list_events: List calendar events for a date range
+- get_free_time: Get available free time blocks for a day
+- get_week_overview: Busy/free summary for the next 7 days
+- create_event: Create a new calendar event
+
+Usage:
+    python3.11 mcp/google-calendar/server.py list_events --start-date 2026-02-10
+    python3.11 mcp/google-calendar/server.py get_free_time --date 2026-02-10
+    python3.11 mcp/google-calendar/server.py get_week_overview
+    python3.11 mcp/google-calendar/server.py create_event --title "Meeting" --start "2026-02-10T14:00:00" --end "2026-02-10T15:00:00"
+
+All output is JSON to stdout.
 """
 
-import os
+import argparse
 import json
-import asyncio
+import os
+import sys
 from datetime import datetime, timedelta
-from typing import Any
 from zoneinfo import ZoneInfo
-
-# MCP SDK imports
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
 
 # Google Calendar API imports
 from google.oauth2.credentials import Credentials
@@ -27,6 +30,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
+# Add project root to path for mirage_core imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from mirage_core.config import MirageConfig
 
 # OAuth scopes
@@ -35,8 +40,6 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 # Paths
 CREDENTIALS_PATH = os.path.expanduser('~/.config/mirage/credentials.json')
 TOKEN_PATH = os.path.expanduser('~/.config/mirage/token.json')
-
-server = Server("google-calendar")
 
 
 def get_timezone() -> str:
@@ -81,123 +84,11 @@ def get_calendar_service():
     return build('calendar', 'v3', credentials=creds)
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    """List available calendar tools."""
-    return [
-        Tool(
-            name="get_free_time",
-            description="Get available free time blocks for a specific date",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "description": "Date in YYYY-MM-DD format (defaults to today)"
-                    },
-                    "work_start": {
-                        "type": "string",
-                        "description": "Work day start time in HH:MM format (default: 09:00)"
-                    },
-                    "work_end": {
-                        "type": "string",
-                        "description": "Work day end time in HH:MM format (default: 18:00)"
-                    }
-                }
-            }
-        ),
-        Tool(
-            name="get_week_overview",
-            description="Get busy/free time summary for the current week",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "work_start": {
-                        "type": "string",
-                        "description": "Work day start time in HH:MM format (default: 09:00)"
-                    },
-                    "work_end": {
-                        "type": "string",
-                        "description": "Work day end time in HH:MM format (default: 18:00)"
-                    }
-                }
-            }
-        ),
-        Tool(
-            name="create_event",
-            description="Create a new calendar event",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "Event title"
-                    },
-                    "start": {
-                        "type": "string",
-                        "description": "Start time in ISO format (YYYY-MM-DDTHH:MM:SS)"
-                    },
-                    "end": {
-                        "type": "string",
-                        "description": "End time in ISO format (YYYY-MM-DDTHH:MM:SS)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Event description (optional)"
-                    }
-                },
-                "required": ["title", "start", "end"]
-            }
-        ),
-        Tool(
-            name="list_events",
-            description="List calendar events for a date range",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "start_date": {
-                        "type": "string",
-                        "description": "Start date in YYYY-MM-DD format (defaults to today)"
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "End date in YYYY-MM-DD format (defaults to 7 days from start)"
-                    }
-                }
-            }
-        )
-    ]
-
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    """Handle tool calls."""
-    try:
-        service = get_calendar_service()
-
-        if name == "get_free_time":
-            return await get_free_time(service, arguments)
-        elif name == "get_week_overview":
-            return await get_week_overview(service, arguments)
-        elif name == "create_event":
-            return await create_event(service, arguments)
-        elif name == "list_events":
-            return await list_events(service, arguments)
-        else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
-    except Exception as e:
-        return [TextContent(type="text", text=f"Error: {str(e)}")]
-
-
-async def get_free_time(service, args: dict) -> list[TextContent]:
+def get_free_time(service, date_str: str, work_start: str = "09:00", work_end: str = "18:00") -> dict:
     """Calculate free time blocks for a given day."""
-    date_str = args.get("date", datetime.now().strftime("%Y-%m-%d"))
-    work_start = args.get("work_start", "09:00")
-    work_end = args.get("work_end", "18:00")
     tz = get_zoneinfo(get_timezone())
 
     # Parse date and work hours
-    date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz)
     start_dt = datetime.strptime(
         f"{date_str} {work_start}", "%Y-%m-%d %H:%M"
     ).replace(tzinfo=tz)
@@ -241,21 +132,16 @@ async def get_free_time(service, args: dict) -> list[TextContent]:
 
     total_free = sum(block["duration_minutes"] for block in free_blocks)
 
-    result = {
+    return {
         "date": date_str,
         "total_free_minutes": total_free,
         "total_free_hours": round(total_free / 60, 1),
         "free_blocks": free_blocks
     }
 
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-
-async def get_week_overview(service, args: dict) -> list[TextContent]:
-    """Get busy/free summary for the week."""
-    work_start = args.get("work_start", "09:00")
-    work_end = args.get("work_end", "18:00")
-
+def get_week_overview(service, work_start: str = "09:00", work_end: str = "18:00") -> dict:
+    """Get busy/free summary for the next 7 days."""
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     week_data = []
 
@@ -263,13 +149,7 @@ async def get_week_overview(service, args: dict) -> list[TextContent]:
         day = today + timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
 
-        free_result = await get_free_time(service, {
-            "date": day_str,
-            "work_start": work_start,
-            "work_end": work_end
-        })
-
-        day_data = json.loads(free_result[0].text)
+        day_data = get_free_time(service, day_str, work_start, work_end)
         week_data.append({
             "date": day_str,
             "day": day.strftime("%A"),
@@ -278,36 +158,40 @@ async def get_week_overview(service, args: dict) -> list[TextContent]:
 
     total_free = sum(d["free_hours"] for d in week_data)
 
-    result = {
+    return {
         "week_start": today.strftime("%Y-%m-%d"),
         "total_free_hours": round(total_free, 1),
         "days": week_data
     }
 
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-
-async def create_event(service, args: dict) -> list[TextContent]:
+def create_event(service, title: str, start: str, end: str, description: str | None = None) -> dict:
     """Create a new calendar event."""
     timezone = get_timezone()
     event = {
-        'summary': args['title'],
-        'start': {'dateTime': args['start'], 'timeZone': timezone},
-        'end': {'dateTime': args['end'], 'timeZone': timezone},
+        'summary': title,
+        'start': {'dateTime': start, 'timeZone': timezone},
+        'end': {'dateTime': end, 'timeZone': timezone},
     }
 
-    if 'description' in args:
-        event['description'] = args['description']
+    if description:
+        event['description'] = description
 
     created = service.events().insert(calendarId='primary', body=event).execute()
 
-    return [TextContent(type="text", text=f"Event created: {created.get('htmlLink')}")]
+    return {
+        "success": True,
+        "event_link": created.get('htmlLink'),
+        "event_id": created.get('id'),
+        "summary": created.get('summary'),
+    }
 
 
-async def list_events(service, args: dict) -> list[TextContent]:
+def list_events(service, start_date: str, end_date: str | None = None) -> list:
     """List events for a date range."""
-    start_date = args.get("start_date", datetime.now().strftime("%Y-%m-%d"))
-    end_date = args.get("end_date", (datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d"))
+    if not end_date:
+        end_date = (datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d")
+
     tz = get_zoneinfo(get_timezone())
 
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=tz)
@@ -331,26 +215,58 @@ async def list_events(service, args: dict) -> list[TextContent]:
             "end": event['end'].get('dateTime', event['end'].get('date'))
         })
 
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+    return result
 
 
-async def main():
-    """Run the MCP server."""
-    # Fail fast if credentials are missing
-    if not os.path.exists(CREDENTIALS_PATH) and not os.path.exists(TOKEN_PATH):
-        import sys
-        print(
-            f"ERROR: No Google Calendar credentials found.\n"
-            f"  Expected credentials at: {CREDENTIALS_PATH}\n"
-            f"  Or existing token at: {TOKEN_PATH}\n"
-            f"  Download from Google Cloud Console and save to credentials path.",
-            file=sys.stderr,
-        )
+def main():
+    parser = argparse.ArgumentParser(description="Google Calendar CLI for Mirage")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # list_events
+    p_list = subparsers.add_parser("list_events", help="List events for a date range")
+    p_list.add_argument("--start-date", default=datetime.now().strftime("%Y-%m-%d"),
+                        help="Start date YYYY-MM-DD (default: today)")
+    p_list.add_argument("--end-date", default=None,
+                        help="End date YYYY-MM-DD (default: start + 7 days)")
+
+    # get_free_time
+    p_free = subparsers.add_parser("get_free_time", help="Get free time blocks for a day")
+    p_free.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"),
+                        help="Date YYYY-MM-DD (default: today)")
+    p_free.add_argument("--work-start", default="09:00", help="Work start HH:MM (default: 09:00)")
+    p_free.add_argument("--work-end", default="18:00", help="Work end HH:MM (default: 18:00)")
+
+    # get_week_overview
+    p_week = subparsers.add_parser("get_week_overview", help="Busy/free summary for next 7 days")
+    p_week.add_argument("--work-start", default="09:00", help="Work start HH:MM (default: 09:00)")
+    p_week.add_argument("--work-end", default="18:00", help="Work end HH:MM (default: 18:00)")
+
+    # create_event
+    p_create = subparsers.add_parser("create_event", help="Create a calendar event")
+    p_create.add_argument("--title", required=True, help="Event title")
+    p_create.add_argument("--start", required=True, help="Start time ISO format (YYYY-MM-DDTHH:MM:SS)")
+    p_create.add_argument("--end", required=True, help="End time ISO format (YYYY-MM-DDTHH:MM:SS)")
+    p_create.add_argument("--description", default=None, help="Event description")
+
+    args = parser.parse_args()
+
+    try:
+        service = get_calendar_service()
+
+        if args.command == "list_events":
+            result = list_events(service, args.start_date, args.end_date)
+        elif args.command == "get_free_time":
+            result = get_free_time(service, args.date, args.work_start, args.work_end)
+        elif args.command == "get_week_overview":
+            result = get_week_overview(service, args.work_start, args.work_end)
+        elif args.command == "create_event":
+            result = create_event(service, args.title, args.start, args.end, args.description)
+
+        print(json.dumps(result, indent=2))
+    except Exception as e:
+        print(json.dumps({"error": True, "message": str(e)}), file=sys.stderr)
         sys.exit(1)
-
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -14,7 +14,6 @@ import pytest
 # Ensure mirage_core is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../mcp/notion"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../mcp/google-calendar"))
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +206,7 @@ class TestNotionTaskPayload:
         task = Task(
             id=TaskId("test-id"),
             name="Test task",
-            status=TaskStatus.TASKS,
+            status=TaskStatus.BACKLOG,
             mentioned=2,
         )
 
@@ -226,19 +225,19 @@ class TestNotionTaskPayload:
 
         assert payload["id"] == "test-id"
         assert payload["content"] == "Test task"
-        assert payload["status"] == "Tasks"
+        assert payload["status"] == "Backlog"
         assert payload["mentioned"] == 2
         assert payload["energy"] is None
         assert payload["tags"] is None
 
 
 # ---------------------------------------------------------------------------
-# Google Calendar MCP server tests
+# Google Calendar CLI helper tests
 # ---------------------------------------------------------------------------
 
 
-class TestCalendarMCPHelpers:
-    """Test Google Calendar server helpers that don't need credentials."""
+class TestCalendarCLIHelpers:
+    """Test Google Calendar helper logic (timezone, event body construction)."""
 
     def test_get_timezone_returns_string(self):
         """get_timezone returns a timezone string from config."""
@@ -273,12 +272,6 @@ class TestCalendarMCPHelpers:
 
         tz = get_zoneinfo("Invalid/Timezone")
         assert str(tz) == "UTC"
-
-    def test_tool_schema_definitions(self):
-        """Verify expected tool names for calendar server."""
-        expected_tools = {"get_free_time", "get_week_overview", "create_event", "list_events"}
-        # These are the tool names defined in the calendar server
-        assert len(expected_tools) == 4
 
     def test_event_body_construction(self):
         """Test event body construction logic from create_event."""
@@ -369,18 +362,22 @@ class TestAliasResolution:
         from mirage_core.aliases import resolve_status
         from mirage_core.models import TaskStatus
 
-        assert resolve_status("Tasks") == TaskStatus.TASKS
+        assert resolve_status("Backlog") == TaskStatus.BACKLOG
+        assert resolve_status("Do Now") == TaskStatus.DO_NOW
+        assert resolve_status("In Progress") == TaskStatus.IN_PROGRESS
         assert resolve_status("Done") == TaskStatus.DONE
-        assert resolve_status("Projects") == TaskStatus.PROJECTS
-        assert resolve_status("Ideas") == TaskStatus.IDEAS
 
     def test_resolve_status_aliases(self):
         """Common aliases resolve to canonical statuses."""
         from mirage_core.aliases import resolve_status
         from mirage_core.models import TaskStatus
 
-        assert resolve_status("Action") == TaskStatus.TASKS
-        assert resolve_status("action") == TaskStatus.TASKS
+        assert resolve_status("Tasks") == TaskStatus.BACKLOG
+        assert resolve_status("Action") == TaskStatus.BACKLOG
+        assert resolve_status("action") == TaskStatus.BACKLOG
+        assert resolve_status("Projects") == TaskStatus.BACKLOG
+        assert resolve_status("Ideas") == TaskStatus.NOT_NOW
+        assert resolve_status("Blocked") == TaskStatus.WAITING_ON
 
     def test_resolve_type_canonical(self):
         """Canonical type names resolve correctly."""

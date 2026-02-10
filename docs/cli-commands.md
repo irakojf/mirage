@@ -93,11 +93,20 @@ Fit these tasks into my calendar for tomorrow.
 | `mcp__notion__get_production_calendar` | Check production/content calendar |
 | `mcp__notion__get_notion_page` | Read any Notion page by ID |
 
-## Google Calendar MCP Tools
+## Google Calendar CLI
 
-| Tool | Purpose |
-|------|---------|
-| `mcp__google-calendar__get_free_time` | Get free time blocks for a date |
-| `mcp__google-calendar__get_week_overview` | Get busy/free summary for the week |
-| `mcp__google-calendar__create_event` | Create a calendar event |
-| `mcp__google-calendar__list_events` | List events for a date range |
+Invoked via Bash. All commands output JSON to stdout.
+
+```bash
+# List events
+python3.11 mcp/google-calendar/server.py list_events --start-date YYYY-MM-DD [--end-date YYYY-MM-DD]
+
+# Free time blocks for a day
+python3.11 mcp/google-calendar/server.py get_free_time --date YYYY-MM-DD [--work-start HH:MM] [--work-end HH:MM]
+
+# Week overview (next 7 days)
+python3.11 mcp/google-calendar/server.py get_week_overview [--work-start HH:MM] [--work-end HH:MM]
+
+# Create event
+python3.11 mcp/google-calendar/server.py create_event --title "Title" --start "YYYY-MM-DDTHH:MM:SS" --end "YYYY-MM-DDTHH:MM:SS" [--description "..."]
+```

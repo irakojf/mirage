@@ -45,12 +45,14 @@ Notion database ID: `2ea35d23-b569-80cc-99be-e6d6a17b1548`
 | Property | Type | Values |
 |----------|------|--------|
 | Name | title | Task description |
-| Status | status | Tasks, Projects, Ideas, Blocked, Done |
+| Status | status | Do Now, In Progress, Backlog, Waiting On, Not Now, Done, Won't Do |
+| Kind | select | Task, Project, Idea |
 | Mentioned | number | Procrastination counter |
 | Blocked | text | Who/what is blocking |
 | Energy | select | Red, Yellow, Green |
-| Type | select | Identity, Compound |
+| Type | select | Identity, Compound, Do It Now, Never Miss 2x, Important Not Urgent, Unblocks |
 | Complete Time | number | Estimated minutes to complete |
+| Priority | number | P1=urgent/blockers, P2=important/active this week, P3=backlog/actionable, P4=ideas/not now. Always assign. |
 
 ### Reviews: Notion Database
 
@@ -99,27 +101,64 @@ Use these during `/review` or when a task keeps appearing:
 
 ## MCP Servers
 
-- `google-calendar`: Check free time, schedule tasks
-- `notion`: Task management (query, create, update) + Production Calendar
-- `slack`: Capture tasks via @mirage mentions (see Slack Integration below)
+### Google Calendar (CLI)
 
-## Task Status (Notion)
+**Script:** `mcp/google-calendar/server.py` (plain CLI, not MCP)
+**Credentials:** `~/.config/mirage/credentials.json` + `~/.config/mirage/token.json`
+
+Use via Bash — all commands output JSON to stdout:
+```bash
+# List events for a date range
+python3.11 mcp/google-calendar/server.py list_events --start-date 2026-02-10
+
+# Get free time blocks for a day
+python3.11 mcp/google-calendar/server.py get_free_time --date 2026-02-10
+
+# Get week overview (busy/free for next 7 days)
+python3.11 mcp/google-calendar/server.py get_week_overview
+
+# Create an event
+python3.11 mcp/google-calendar/server.py create_event --title "Meeting" --start "2026-02-10T14:00:00" --end "2026-02-10T15:00:00"
+```
+
+**Troubleshooting:** If commands fail, check:
+1. OAuth token at `~/.config/mirage/token.json` may need refresh
+2. Run from project root so `mirage_core` is importable
+
+### Notion
+
+**Config:** `.mcp.json` → `notion` server
+Task management (query, create, update) + Production Calendar
+
+### Slack
+
+Capture tasks via `/mirage` slash command (see Slack Integration below)
+
+## Task Status (Notion) — Lifecycle States
 
 | Status | Criteria |
 |--------|----------|
-| **Tasks** | Single sitting, clear next step — do this week |
-| **Projects** | Multi-step, needs breakdown |
-| **Ideas** | Fuzzy, needs more thinking before actionable |
-| **Not Now** | Clear task, but parked — revisit in weekly review |
-| **Blocked** | Waiting on someone/something |
-| **Won't Do** | Decided against — kept for record |
+| **Do Now** | This week's focus. 3-7 items max. |
+| **In Progress** | Actively being worked on right now |
+| **Backlog** | Clear, actionable. Not this week. |
+| **Waiting On** | Blocked by a person or dependency |
+| **Not Now** | Parked. Revisit in weekly review. |
 | **Done** | Completed |
+| **Won't Do** | Decided against — kept for record |
 
-## Task Type (Notion)
+## Item Kind (Notion) — What type of item?
+
+| Kind | Criteria |
+|------|----------|
+| **Task** | Single sitting, clear next step |
+| **Project** | Multi-step, needs breakdown |
+| **Idea** | Needs more thinking before actionable |
+
+## Task Tag (Notion)
 
 | Tag | Meaning |
 |-----|---------|
-| `[Do It Now ]` | ≤2 min, do immediately |
+| `[Do It Now]` | ≤2 min, do immediately |
 | `[Never Miss 2x]` | Skipped yesterday |
 | `[Important Not Urgent]` | Eisenhower Q2 — strategic, not urgent |
 | `[Unblocks]` | Unlocks other tasks |
