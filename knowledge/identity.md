@@ -1,5 +1,10 @@
 # Identity
 
+## Agency
+
+> I am the type of person who goes for what I want instead of letting things happen to me. I don't let opportunities go to waste.
+> 
+
 ## Health (Mental)
 
 > I am the type of person who maintains mental calm and clarity.
