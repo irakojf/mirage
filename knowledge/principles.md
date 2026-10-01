@@ -240,15 +240,3 @@ Small improvements compound:
 > "We don't usually think about it, but when you choose who to follow on Twitter, you're choosing your future thoughts."
 
 ---
-
-## Application for Mirage
-
-When processing tasks, apply these filters:
-
-1. **Identity alignment** — Does this task connect to who the user wants to become?
-2. **Keystone check** — Is this upstream from other important behaviors?
-3. **2-minute test** — Can this be done in 2 minutes? Flag as `[DO IT]`
-4. **Never miss twice** — If skipped yesterday, it's priority today
-5. **Friction analysis** — What's making this hard? How to reduce friction?
-6. **Environment question** — What setup would make this automatic?
-7. **Compound potential** — Does this small action build over time? `[COMPOUNDS]`
